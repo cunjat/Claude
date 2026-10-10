@@ -153,7 +153,7 @@ local wGame, iGame = word(ART.game, rowX + tw_ + gap, uh + 10, gw, gh)
 local restUntitled, restTyre = wUntitled.Position, wTyre.Position
 
 -- the drawn title: one label a letter (fill, edge, shadow), laid out by its real width
-local ITALIC = Font.new("rbxasset://fonts/families/Montserrat.json", Enum.FontWeight.Black, Enum.FontStyle.Italic)
+local ITALIC = Font.new("rbxasset://fonts/families/Montserrat.json", Enum.FontWeight.Heavy, Enum.FontStyle.Italic)
 local TextService = game:GetService("TextService")
 local letters: { { holder: Frame, label: TextLabel, shadow: TextLabel, scale: UIScale, rest: UDim2, delay: number, big: boolean } } = {}
 local shineGrads: { UIGradient } = {}

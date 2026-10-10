@@ -39,7 +39,7 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 	local root = UI.mk("Frame", { Name = "TyreStand", Size = size, BackgroundTransparency = 1, Parent = parent })
 	local well = Kit.slot(root, Color3.fromRGB(150, 152, 160), (root.ZIndex or 1))
 	local rarity = (well:FindFirstChild("Edge") :: Frame):FindFirstChild("Rarity") :: UIStroke
-	UI.mk("ImageLabel", {
+	local spot = UI.mk("ImageLabel", {
 		Name = "Spot", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.775), Size = UDim2.fromScale(0.86, 0.3),
 		BackgroundTransparency = 1, Image = SPOT, ZIndex = (root.ZIndex or 1) + 1, Parent = root,
 	})
@@ -52,7 +52,11 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 	local cam = Instance.new("Camera")
 	-- framed so the tyre's tread lands on the floor shadow (77% down the well)
 	cam.FieldOfView = 30
-	cam.CFrame = CFrame.lookAt(Vector3.new(0, 4.2, 22), Vector3.new(0, 3.1, 0))
+	local CAM_SHOW = CFrame.lookAt(Vector3.new(0, 4.2, 22), Vector3.new(0, 3.1, 0))
+	-- the sticker view: straight onto the sidewall, close, the hub in the middle
+	local EDIT_DIST = 12.5
+	local CAM_EDIT = CFrame.lookAt(Vector3.new(0, D / 2, EDIT_DIST), Vector3.new(0, D / 2, 0))
+	cam.CFrame = CAM_SHOW
 	cam.Parent = vp
 	vp.CurrentCamera = cam
 	-- a tyre not found yet: a coloured backlight behind it and a fog over its foot
@@ -72,6 +76,7 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 	local model: Model? = nil
 	local yaw = THUMB_YAW
 	local turning = true
+	local editing = false
 	local conn = RunService.RenderStepped:Connect(function(dt)
 		if model and turning and root.Visible then
 			yaw += dt * 0.55
@@ -92,9 +97,31 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 		backlight.Visible = known == false
 		fog.Visible = known == false
 		;(model :: Model).Parent = world
-		TyreShow.pose(model :: Model, yaw)
+		TyreShow.pose(model :: Model, if editing then 0 else yaw)
 	end
 	function api.setTurning(on: boolean) turning = on end
+	-- the sticker view: the tyre stops, turns its face to you and the camera closes in on it
+	function api.setEdit(on: boolean)
+		if on == editing then return end
+		editing = on
+		turning = not on
+		spot.Visible = not on
+		if on then
+			yaw = 0
+			if model then TyreShow.pose(model, 0) end
+		end
+		local cv = Instance.new("CFrameValue")
+		cv.Value = cam.CFrame
+		cv.Changed:Connect(function(v) cam.CFrame = v end)
+		local tw = game:GetService("TweenService"):Create(cv, TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
+			{ Value = if on then CAM_EDIT else CAM_SHOW })
+		tw.Completed:Connect(function() cv:Destroy() end)
+		tw:Play()
+	end
+	-- in the sticker view: pixels on screen per stud at the sidewall, and the wheel's radius in studs
+	function api.editScale(): (number, number)
+		return root.AbsoluteSize.Y / (2 * EDIT_DIST * math.tan(math.rad(cam.FieldOfView / 2))), D / 2
+	end
 	-- the tyre standing in the bay now (the Workbench lays stickers on it)
 	function api.model(): Model? return model end
 	function api.setRarity(c: Color3, back: Color3?)

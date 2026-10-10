@@ -1,12 +1,13 @@
 --!strict
 -- TYRE CANNON :: Workbench
--- Where you look after your tyres, on a bench under one warm lamp with dust drifting in the light.
+-- Where you look after your tyres: the selected tyre on its stand, clean (no dust, no lamp haze).
 --   left     the selected tyre on the bench, turning slowly, stickers and all; its name, rarity, what it
 --            does, and a FAV pill (a favourite sorts first and is never used up by a Fuse)
 --   Tyres    organize: sort by best, rarity, newest or name; show only favourites; pick one
---   Stickers dress the selected tyre: pick a sticker from the pack, then place it round the sidewall
---            (angle, distance from the hub, size, turn, both sides); up to Config.Stickers.MaxPerTyre;
---            Save keeps it (it goes on the tyre in your runs too)
+--   Stickers dress the selected tyre: the bench closes in on its sidewall, face-on; pick a sticker
+--            from the pack and it goes on, outlined; drag it round the wheel with the mouse (or a
+--            finger), scroll over it to size it, or use the sliders (round, out, size, turn, both
+--            sides); up to Config.Stickers.MaxPerTyre; Save keeps it (it goes on the tyre in your runs too)
 --   Workbench.new(gui, remotes) · :setProfile(p) · :open() · :close() · :isOpen()
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -102,11 +103,8 @@ function Workbench.new(gui: ScreenGui, remotes: Instance)
 	self.stand = TyreShow.stand(face, UDim2.fromOffset(324, 300))
 	self.stand.root.Position = UDim2.fromOffset(26, 50)
 	self.stand.root.ZIndex = 6
-	UI.mk("ImageLabel", {
-		Name = "Lamp", AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 0), Size = UDim2.fromScale(1, 0.7), BackgroundTransparency = 1,
-		Image = Kit.Art.glow, ImageColor3 = Color3.fromRGB(255, 178, 90), ImageTransparency = 0.72, ZIndex = 12, Parent = self.stand.root,
-	})
-	dust(self.stand.root, 28)
+	local _ = dust
+	self:buildStickerPad()
 	self.dName = Kit.text("", 26, C.text, 2)
 	self.dName.Position = UDim2.fromOffset(26, 358)
 	self.dName.Size = UDim2.fromOffset(324, 32)
@@ -205,6 +203,12 @@ function Workbench:buildTyres(page: Frame)
 	})
 	UI.mk("UIGridLayout", { CellSize = UDim2.fromOffset(Tyres2.CELL.X, Tyres2.CELL.Y), CellPadding = UDim2.fromOffset(10, 12), SortOrder = Enum.SortOrder.LayoutOrder, Parent = self.grid })
 	UI.mk("UIPadding", { PaddingTop = UDim.new(0, 20), PaddingLeft = UDim.new(0, 8), PaddingBottom = UDim.new(0, 40), Parent = self.grid })
+	-- the cards' thumbnails are made as they scroll into view (Tyres2:fillVisible)
+	self.grid:GetPropertyChangedSignal("CanvasPosition"):Connect(function() self:fillThumbs() end)
+end
+
+function Workbench:fillThumbs()
+	if self.gridShim then (Tyres2 :: any).fillVisible(self.gridShim) end
 end
 
 -- the tyres you own, sorted and filtered
@@ -243,8 +247,11 @@ function Workbench:renderGrid()
 	end
 	local list = self:owned()
 	self.count.Text = ("%d tyre%s"):format(#list, #list == 1 and "" or "s")
-	local dummy = { cells = {}, list = self.grid }
+	local dummy = { cells = {}, list = self.grid, root = self.root }
+	self.gridShim = dummy
 	self.cells = {}
+	task.defer(function() self:fillThumbs() end)
+	task.delay(0.1, function() self:fillThumbs() end)
 	if self.showAll then
 		-- the collection: every tyre in the game, the ones you've never pulled as dark shapes
 		local all, found = {}, 0
@@ -492,6 +499,130 @@ function Workbench:redress()
 	local m = self.stand.model()
 	if m then TyreSticker.apply(m, self.stickers) end
 	self.dirty = true
+	self:placeOutline()
+end
+
+--==============================================================
+-- the sticker pad: over the bench in the sticker view, it outlines the picked sticker and lets
+-- you grab any sticker and drag it round the wheel (scroll over the pad to size the picked one)
+--==============================================================
+function Workbench:buildStickerPad()
+	local root = self.stand.root
+	local pad = UI.mk("TextButton", {
+		Name = "StickerPad", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", AutoButtonColor = false,
+		Visible = false, ZIndex = (root.ZIndex or 6) + 8, Parent = root,
+	})
+	self.pad = pad
+	-- the outline round the picked sticker, pulsing so it reads as the one you're moving
+	local ring = UI.mk("Frame", {
+		Name = "Outline", AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, Visible = false, ZIndex = pad.ZIndex + 1, Parent = pad,
+	}, { UI.corner(6) })
+	local stroke = UI.mk("UIStroke", { Color = C.orange, Thickness = 3, Transparency = 0, Parent = ring })
+	local glow = UI.mk("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(1, 26, 1, 26), BackgroundTransparency = 1,
+		Image = Kit.Art.glow, ImageColor3 = C.orange, ImageTransparency = 0.55, ZIndex = pad.ZIndex, Parent = ring,
+	})
+	self.outline, self.outlineStroke, self.outlineGlow = ring, stroke, glow
+	local hint = Kit.text("Drag a sticker to move it  ·  scroll to size it", 13, C.white, 2, Kit.Body)
+	hint.AnchorPoint = Vector2.new(0.5, 1)
+	hint.Position = UDim2.new(0.5, 0, 1, -8)
+	hint.Size = UDim2.new(1, -16, 0, 16)
+	Kit.fit(hint, 13, 9)
+	hint.ZIndex = pad.ZIndex + 2
+	hint.Parent = pad
+	RunService.RenderStepped:Connect(function()
+		if ring.Visible then
+			local k = 0.5 + 0.5 * math.sin(os.clock() * 6)
+			stroke.Transparency = 0.05 + 0.35 * k
+			stroke.Thickness = if self.dragging then 4 else 3
+			glow.ImageTransparency = 0.45 + 0.3 * k
+		end
+	end)
+	local GuiService = game:GetService("GuiService")
+	local UIS = game:GetService("UserInputService")
+	-- a pointer position in the pad's own pixels from the hub (screen y down)
+	local function fromHub(io: InputObject): Vector2
+		local inset = GuiService:GetGuiInset()
+		local p = Vector2.new(io.Position.X, io.Position.Y) + inset
+		local centre = root.AbsolutePosition + root.AbsoluteSize / 2
+		return p - centre
+	end
+	pad.InputBegan:Connect(function(io)
+		if io.UserInputType ~= Enum.UserInputType.MouseButton1 and io.UserInputType ~= Enum.UserInputType.Touch then return end
+		local d = fromHub(io)
+		-- the sticker under the pointer (the nearest centre within its size), picked and grabbed
+		local best, bestD = nil, math.huge
+		for i, s0 in ipairs(self.stickers) do
+			local c, w, h = self:stickerOnPad(s0)
+			local dist = (c - d).Magnitude
+			if dist < math.max(w, h) * 0.6 + 10 and dist < bestD then best, bestD = i, dist end
+		end
+		if best then
+			self.selSticker = best
+			self.dragging = true
+			local c = self:stickerOnPad(self.stickers[best])
+			self.grabOff = c - d
+			self:refreshStickerUI()
+			Kit.pop(ring, 1.15, 0.18)
+		end
+	end)
+	UIS.InputChanged:Connect(function(io)
+		if not self.dragging then return end
+		if io.UserInputType ~= Enum.UserInputType.MouseMovement and io.UserInputType ~= Enum.UserInputType.Touch then return end
+		local s0 = self.stickers[self.selSticker or 0]
+		if not s0 then return end
+		local d = fromHub(io) + (self.grabOff or Vector2.zero)
+		local px, radius = self.stand.editScale()
+		local out = d.Magnitude / math.max(px * radius, 1)
+		s0.a = math.deg(math.atan2(d.X, -d.Y))
+		s0.r = math.clamp(out, 0.6, 1.0)
+		self.setA(s0.a)
+		self.setR(s0.r)
+		self:redress()
+	end)
+	UIS.InputEnded:Connect(function(io)
+		if io.UserInputType == Enum.UserInputType.MouseButton1 or io.UserInputType == Enum.UserInputType.Touch then
+			self.dragging = false
+		end
+	end)
+	pad.MouseWheelForward:Connect(function() self:nudgeSize(0.1) end)
+	pad.MouseWheelBackward:Connect(function() self:nudgeSize(-0.1) end)
+end
+
+-- where a sticker sits on the pad (pixels from the hub) and its size there
+function Workbench:stickerOnPad(s0): (Vector2, number, number)
+	local px, radius = self.stand.editScale()
+	local a = math.rad(s0.a or 0)
+	local r = (s0.r or 0.82) * radius * px
+	local e = TyreSticker.catalogue().byId[s0.id]
+	local k = (s0.size or 1) * radius / 4 * px
+	local w = e and e.size.X * k or 30
+	local h = e and e.size.Y * k or 30
+	return Vector2.new(math.sin(a) * r, -math.cos(a) * r), w, h
+end
+
+function Workbench:nudgeSize(by: number)
+	local s0 = self.stickers[self.selSticker or 0]
+	if not s0 then return end
+	s0.size = math.clamp((s0.size or 1) + by, 0.3, 2.5)
+	self.setSize(s0.size)
+	self:redress()
+end
+
+-- the outline over the picked sticker
+function Workbench:placeOutline()
+	local ring = self.outline
+	if not ring then return end
+	local s0 = self.stickers[self.selSticker or 0]
+	if not (s0 and self.tab == "stickers") then
+		ring.Visible = false
+		return
+	end
+	local c, w, h = self:stickerOnPad(s0)
+	ring.Visible = true
+	ring.Position = UDim2.new(0.5, c.X, 0.5, c.Y)
+	ring.Size = UDim2.fromOffset(w + 8, h + 8)
+	ring.Rotation = s0.rot or 0
 end
 
 -- the chips and sliders for the sticker picked
@@ -519,6 +650,7 @@ function Workbench:refreshStickerUI()
 	local s = self.stickers[self.selSticker or 0]
 	self.controls.Visible = s ~= nil
 	self.removeBtn.root.Visible = s ~= nil
+	self:placeOutline()
 	if s then
 		self.setA(s.a)
 		self.setR(s.r)
@@ -610,6 +742,9 @@ function Workbench:setTab(name: string)
 	self.tab = name
 	for k, b in pairs(self.tabBtns) do b.setColor(if k == name then C.orange else C.grey) end
 	for k, page in pairs(self.pages) do page.Visible = k == name end
+	-- the sticker view closes in on the sidewall; the tyres page shows it turning on its stand
+	self.stand.setEdit(name == "stickers")
+	if self.pad then self.pad.Visible = name == "stickers" end
 	if name == "stickers" then
 		self:renderCatalogue()
 		self:refreshStickerUI()
