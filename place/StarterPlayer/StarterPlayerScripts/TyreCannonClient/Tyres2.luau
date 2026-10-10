@@ -181,6 +181,38 @@ function Tyres2.new(gui: ScreenGui, remotes: Instance)
 	forge.onClick = function() if self.sel then self:forge(self.sel.id, self.sel.forge) end end
 	self.bLaunch, self.bSpare, self.bForge = launch, spare, forge
 
+	-- what its special and skill do: a pill on the stand opens a card over it
+	local abil = Kit.button("Abilities", C.purple, UDim2.fromOffset(110, 30), 14)
+	abil.root.AnchorPoint = Vector2.new(1, 0)
+	abil.root.Position = UDim2.fromOffset(646 + 290 - 10, 54)
+	abil.root.ZIndex = 14
+	abil.root.Visible = false
+	abil.root.Parent = face
+	self.abilBtn = abil
+	local card = UI.mk("Frame", { Position = UDim2.fromOffset(646, 44), Size = UDim2.fromOffset(290, 268), BackgroundTransparency = 1, Visible = false, ZIndex = 12, Parent = face })
+	Kit.slice("panel_body", nil, card, 12, 0.4)
+	self.abilRing = Kit.slice("panel_ring", C.purple, card, 13, 0.4)
+	local body = Kit.text("", 15, C.text, 1.5, Kit.Body)
+	body.Position = UDim2.fromOffset(16, 44)
+	body.Size = UDim2.new(1, -32, 1, -56)
+	body.TextWrapped = true
+	body.TextXAlignment = Enum.TextXAlignment.Left
+	body.TextYAlignment = Enum.TextYAlignment.Top
+	body.ZIndex = 14
+	body.Parent = card
+	local title = Kit.text("WHAT IT DOES", 17, C.white, 2)
+	title.TextXAlignment = Enum.TextXAlignment.Left
+	title.Position = UDim2.fromOffset(16, 14)
+	title.Size = UDim2.fromOffset(160, 22)
+	title.ZIndex = 14
+	title.Parent = card
+	self.abilCard, self.abilBody = card, body
+	abil.onClick = function()
+		card.Visible = not card.Visible
+		abil.setText(if card.Visible then "Close" else "Abilities")
+		if card.Visible then Kit.pop(card, 0.92, 0.2) end
+	end
+
 	-- the selected card's tyre turns slowly
 	self.turnYaw = TyreShow.THUMB_YAW
 	self.turnConn = nil :: RBXScriptConnection?
@@ -563,6 +595,22 @@ function Tyres2:select(s)
 		table.insert(lines, 1, "NOT FOUND YET: " .. string.upper(where))
 	end
 	self.dInfo.Text = table.concat(lines, "\n")
+	-- the abilities card: what the special and the skill do
+	local abilities = Game.tyreAbilities(t.id)
+	self.abilBtn.root.Visible = #abilities > 0
+	if #abilities == 0 then
+		self.abilCard.Visible = false
+		self.abilBtn.setText("Abilities")
+	else
+		local parts = {}
+		for _, a in ipairs(abilities) do
+			local head = if a.kind == "Skill"
+				then ("<font color=\"#FFC440\"><b>SKILL  ·  %s</b></font>   <font color=\"#AAA49C\">press %s, every %ds</font>"):format(string.upper(a.name), a.key or "E", a.cooldown or 0)
+				else ("<font color=\"#B482FF\"><b>SPECIAL  ·  %s</b></font>   <font color=\"#AAA49C\">always on</font>"):format(string.upper(a.name))
+			table.insert(parts, head .. "\n" .. a.text)
+		end
+		self.abilBody.Text = table.concat(parts, "\n\n")
+	end
 	local can = s.uid ~= nil
 	self.bLaunch.setText(if s.isLaunch then "Your Launch Tyre" else "Set As Launch")
 	self.bLaunch.setEnabled(can and not s.isLaunch)

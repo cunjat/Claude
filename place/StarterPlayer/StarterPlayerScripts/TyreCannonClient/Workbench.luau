@@ -697,7 +697,13 @@ function Workbench:select(uid: number)
 	local plate = self.dPlate:FindFirstChildWhichIsA("ImageLabel")
 	if plate then plate.ImageColor3 = rar.color end
 	self.dPlateText.Text = string.upper(rar.id)
-	self.dInfo.Text = table.concat(Game.tyreLines(t.id, t.forge, t.mut), "\n")
+	local info = Game.tyreLines(t.id, t.forge, t.mut)
+	-- its special and skill, said in full
+	for _, a in ipairs(Game.tyreAbilities(t.id)) do
+		table.insert(info, ("<font color=\"#F4F0E8\">%s: %s</font>"):format(string.upper(a.name), a.text))
+	end
+	self.dInfo.Text = table.concat(info, "\n")
+	self.dInfo.RichText = true
 	self.favBtn.setText(if t.fav then "Favourite: on" else "Favourite")
 	self.favBtn.setColor(if t.fav then C.yellow else C.grey)
 	-- its stickers

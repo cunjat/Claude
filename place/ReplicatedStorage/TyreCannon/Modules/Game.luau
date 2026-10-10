@@ -378,6 +378,18 @@ function Game.tyreLines(id: string, forge: number?, mut: string?): { string }
 	return out
 end
 
+-- what a tyre's special and skill do, for the screens that explain them
+function Game.tyreAbilities(id: string): { { kind: string, name: string, text: string, key: string?, cooldown: number? } }
+	local def = Game.TyresById[id]
+	local out = {}
+	if not def then return out end
+	local sp = def.special and Game.Specials[def.special]
+	if sp then table.insert(out, { kind = "Special", name = sp.name, text = sp.text }) end
+	local sk = def.skill and Game.Skills[def.skill]
+	if sk then table.insert(out, { kind = "Skill", name = sk.name, text = sk.text, key = sk.key, cooldown = sk.cooldown }) end
+	return out
+end
+
 function Game.multText(m: number): string
 	if m >= 100 then return tostring(math.floor(m + 0.5)) end
 	if m >= 10 then return (("%.1f"):format(m):gsub("%.0$", "")) end
