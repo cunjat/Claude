@@ -1302,7 +1302,8 @@ function RunSim:paintTuck(cue: string?, dt: number)
 	self.glowFill = (self.glowFill or 1) + (fill - (self.glowFill or 1)) * k
 	self.glowLine = (self.glowLine or 1) + (line - (self.glowLine or 1)) * k
 	self.glowCol = (self.glowCol or col):Lerp(col, k)
-	local on = self.glowFill < 0.98 or self.glowLine < 0.98
+	-- (not in first person: the camera's inside the tyre there)
+	local on = (self.glowFill < 0.98 or self.glowLine < 0.98) and self.view ~= "first"
 	if hl.Enabled ~= on then hl.Enabled = on end
 	if on then
 		hl.FillColor = self.glowCol

@@ -858,6 +858,8 @@ function Kit.bob(g: GuiObject, amp: number?, speed: number?): () -> ()
 		local t = os.clock() - t0
 		g.Position = rest + UDim2.fromOffset(0, math.sin(t * (speed or 3)) * (amp or 4))
 	end)
+	-- (gone with the thing it bobs, so a closed card leaves nothing running)
+	g.Destroying:Connect(function() conn:Disconnect() end)
 	return function()
 		conn:Disconnect()
 		g.Position = rest

@@ -558,6 +558,14 @@ hub2 = Hub2.new(gui, V2, {
 	end,
 })
 if profile then hub2:setProfile(profile) end
+-- shift lock lets go of the mouse while any menu or card is up, so its buttons can be clicked
+shiftLock.blocked = function()
+	if hub:isOpen() or (hubX and hubX:isDailyOpen()) then return true end
+	for _, p in ipairs(PANELS) do
+		if p and p.isOpen and p:isOpen() then return true end
+	end
+	return false
+end
 hubX = HubExtras.new(gui, V2, {
 	idle = function()
 		if state ~= "hub" or Receipt2.active then return false end
@@ -944,7 +952,12 @@ task.spawn(function()
 		return true
 	end
 	local t1 = os.clock()
-	while os.clock() - t1 < 15 do
+	-- (the bar holds just short of the end while they come in)
+	playerGui:SetAttribute("LoadStageK", 0.9)
+	-- (and stops waiting if the count hasn't moved for three seconds: an image Roblox won't fetch until
+	-- its menu is shown would otherwise hold every join for the full limit)
+	local last, lastMove = math.huge, os.clock()
+	while os.clock() - t1 < 15 and os.clock() - lastMove < 3 do
 		local waiting = 0
 		for _, d in ipairs(playerGui:GetDescendants()) do
 			if (d:IsA("ImageLabel") or d:IsA("ImageButton")) and (d :: any).Image ~= "" and not (d :: any).IsLoaded
@@ -953,9 +966,11 @@ task.spawn(function()
 			end
 		end
 		if waiting == 0 then break end
+		if waiting < last then last, lastMove = waiting, os.clock() end
 		playerGui:SetAttribute("LoadStageName", ("THE INTERFACE  ·  %d TO GO"):format(waiting))
 		task.wait(0.2)
 	end
+	playerGui:SetAttribute("LoadStageK", 1)
 	playerGui:SetAttribute("TyreReady", true)
 	-- (no title: the loading plate drives its tyre off and the game is there)
 end)

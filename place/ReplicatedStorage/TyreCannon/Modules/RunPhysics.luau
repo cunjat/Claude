@@ -22,7 +22,7 @@ export type State = {
 	grounded: boolean, bank: number,
 	-- the tuck (RunPhysics.tuck): held, for how long, cooling, and whether the key was down last step
 	tucking: boolean?, tuckT: number?, tuckCd: number?, tuckPrev: boolean?,
-	tuckAmt: number?, tuckBuf: number?, perfectT: number?,
+	tuckAmt: number?, tuckBuf: number?, perfectT: number?, perfectUsed: boolean?,
 }
 
 export type Input = {
@@ -76,11 +76,13 @@ function RunPhysics.tuck(st: State, pressed: boolean, T: Terrain, F: any, dt: nu
 	local edge = pressed and not st.tuckPrev
 	st.tuckPrev = pressed
 	st.tuckCd = math.max(0, (st.tuckCd or 0) - dt)
-	-- the perfect test, with its grace
+	-- the perfect test, with its grace. One PERFECT a drop: once taken, the chance stays shut until
+	-- the road has stopped dropping away (and the grace has run out)
 	if RunPhysics.perfectAhead(st, T, F) then
-		st.perfectT = F.PerfectGrace or 0.18
+		if not st.perfectUsed then st.perfectT = F.PerfectGrace or 0.18 end
 	else
 		st.perfectT = math.max(0, (st.perfectT or 0) - dt)
+		if st.perfectT <= 0 then st.perfectUsed = false end
 	end
 	-- a press during the cooldown is held for a moment
 	if edge then st.tuckBuf = F.TuckBuffer or 0.2 end
@@ -92,6 +94,7 @@ function RunPhysics.tuck(st: State, pressed: boolean, T: Terrain, F: any, dt: nu
 		if (st.perfectT or 0) > 0 then
 			ev = "perfect"
 			st.perfectT = 0
+			st.perfectUsed = true
 		end
 	end
 	if st.tucking then

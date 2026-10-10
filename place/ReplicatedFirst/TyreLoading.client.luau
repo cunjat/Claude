@@ -472,7 +472,8 @@ local rollConn = RunService.RenderStepped:Connect(function(dt)
 		end
 		local target = (current - 1 + k) / #stepNames
 		shown += (target - shown) * (1 - math.exp(-dt * 7))
-		if current == #stepNames and k >= 1 and target - shown < 0.004 then
+		-- (never READY before the game says it is: the interface may still be coming in)
+		if current == #stepNames and k >= 1 and target - shown < 0.004 and playerGui:GetAttribute("TyreReady") then
 			shown = 1
 			finished = true
 		end

@@ -182,7 +182,10 @@ function LaunchShow2.new(_skinId: string?, plot: Instance?, cannon: Model?, scal
 	-- half way back to the trunnion on the long racing barrels, never less than a tyre deep
 	local bore = math.max(0, (muzzle - self.trunnion):Dot(dir))
 	self.mouth = muzzle + dir * (TYRE_D * 0.1)
-	self.seat = muzzle - dir * math.clamp(bore * 0.62, TYRE_D * 0.95, TYRE_D * 2.8)
+	local depth = math.clamp(bore * 0.62, TYRE_D * 0.95, TYRE_D * 2.8)
+	-- (never out of the back of a short barrel)
+	if bore > 0 then depth = math.min(depth, bore * 0.9) end
+	self.seat = muzzle - dir * depth
 	self.ramp = nil   -- (no launch ramp any more: the cannon fires straight out of its own barrel)
 	self.lobFrom = self.mouth + dir * 9 + Vector3.new(0, 26, 0) - self.side * 2
 	self.spin = 0
@@ -803,6 +806,7 @@ function LaunchShow2:release(_power: number, quality: number, grade: string?)
 	-- if the dial is fired before the tyre's in, it's in now
 	if self.stage == "load" and self.t < LOB_END + RAM_T then
 		self.t = LOB_END + RAM_T
+		self:placeTyre(self.seat, self.spin or 0)
 	end
 	self.chargeLen = CHARGE[self.grade] or 0
 	self.engageTo = 1

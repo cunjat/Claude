@@ -56,13 +56,14 @@ function Hub2.new(gui: ScreenGui, remotes: Instance, actions)
 	self.keyText = kl
 	self.keyBox = kh
 	-- the login reward, while it's waiting to be claimed (closing its card doesn't lose it)
-	local daily = Kit.button("Daily Reward", C.yellow, UDim2.fromOffset(150, 34), 15)
-	daily.root.Position = UDim2.fromOffset(0, 112)
+	-- (beside the keys, not under them: on a short screen the menu below comes up that far)
+	local daily = Kit.button("Daily Reward", C.yellow, UDim2.fromOffset(150, 38), 15)
+	daily.root.Position = UDim2.fromOffset(160, 62)
 	daily.root.Visible = false
 	daily.root.Parent = money
 	daily.onClick = function() if actions.daily then actions.daily() end end
 	self.dailyBtn = daily
-	money.Size = UDim2.fromOffset(240, 150)
+	money.Size = UDim2.fromOffset(320, 110)
 
 	-- the side menu: where you go
 	local side = UI.mk("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 30, 0.6, 0), Size = UDim2.fromOffset(220, 360), BackgroundTransparency = 1, Parent = root })
@@ -105,11 +106,19 @@ function Hub2.new(gui: ScreenGui, remotes: Instance, actions)
 	events.root.Parent = corner
 	-- the flag rides on the tab's face (so it lifts with it on hover), on a pole at its left
 	local evHolder = events.root:FindFirstChild("Holder") :: Frame
-	local evIcon = UI.mk("ImageLabel", {
-		AnchorPoint = Vector2.new(0.2, 0.9), Position = UDim2.new(0, 14, 0.5, 14), Size = UDim2.fromOffset(math.floor(40 * Kit.IconScale), math.floor(40 * Kit.IconScale)),
-		BackgroundTransparency = 1, Image = Kit.Icon.event, ZIndex = 8, Parent = evHolder,
+	-- (a GUI turns about its own middle, so the flag hangs in a frame centred on the pole's foot and
+	-- that frame is what swings: the flag waves from its pole)
+	local fs = math.floor(40 * Kit.IconScale)
+	local flagPivot = UI.mk("Frame", {
+		Name = "FlagPivot", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 14, 0.5, 14), Size = UDim2.fromOffset(fs * 2, fs * 2),
+		BackgroundTransparency = 1, ZIndex = 8, Parent = evHolder,
 	})
-	evIcon.Name = "EventIcon"
+	local flagImg = UI.mk("ImageLabel", {
+		AnchorPoint = Vector2.new(0.2, 0.9), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(fs, fs),
+		BackgroundTransparency = 1, Image = Kit.Icon.event, ZIndex = 8, Parent = flagPivot,
+	})
+	flagImg.Name = "EventIcon"
+	local evIcon = flagPivot
 	-- the label leaves room for the flag and carries the countdown
 	events.label.Position = UDim2.new(0.5, 14, 0.5, -1)
 	events.label.Size = UDim2.new(1, -56, 1, -12)

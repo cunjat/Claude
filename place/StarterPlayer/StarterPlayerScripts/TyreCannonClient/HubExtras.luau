@@ -71,7 +71,7 @@ function HubExtras.new(gui: ScreenGui, remotes: Instance, hooks: { [string]: any
 	self.noticeSub.Parent = root
 	local join = Kit.button("Join", C.red, UDim2.fromOffset(92, 42), 18)
 	join.root.AnchorPoint = Vector2.new(1, 0.5)
-	join.root.Position = UDim2.new(1, -12, 0.5, 0)
+	join.root.Position = UDim2.new(1, -30, 0.5, 0)    -- (clear of the X on the corner)
 	join.root.ZIndex = 6
 	join.root.Parent = root
 	join.onClick = function() self:joinHeat() end
