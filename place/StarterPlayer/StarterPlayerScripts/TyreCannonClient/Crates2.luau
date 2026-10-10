@@ -127,7 +127,7 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	for i, z in ipairs(Game.Zones) do
 		local look = ZONE_LOOK[z.id]
 		local b = UI.mk("TextButton", {
-			Name = z.id, Position = UDim2.fromOffset(22, 54 + (i - 1) * 176), Size = UDim2.fromOffset(212, 164),
+			Name = z.id, Position = UDim2.fromOffset(22, 54 + (i - 1) * 180), Size = UDim2.fromOffset(212, 168),
 			BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 5, Parent = face,
 		})
 		local inner = UI.mk("Frame", { Name = "Inner", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 5, Parent = b })
@@ -137,7 +137,7 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 			BackgroundTransparency = 1, Image = Kit.Art.glow, ImageColor3 = look.color, ImageTransparency = 0.45, ZIndex = 6, Parent = inner,
 		})
 		local pic = UI.mk("ImageLabel", {
-			Name = "Crate", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.4), Size = UDim2.fromOffset(112, 112),
+			Name = "Crate", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.37), Size = UDim2.fromOffset(96, 96),
 			BackgroundTransparency = 1, Image = look.icon, ZIndex = 8, Parent = inner,
 		})
 		local name = Kit.text(string.upper(z.name), 20, C.white, 2.5)
@@ -145,13 +145,14 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 		name.Position = UDim2.new(0.5, 0, 1, -30)
 		name.Size = UDim2.fromOffset(190, 24)
 		Kit.fit(name, 20, 11)
-		name.ZIndex = 9
+		name.ZIndex = 13
 		name.Parent = inner
 		local status = Kit.text("", 14, C.gold, 2, Kit.Body)
 		status.AnchorPoint = Vector2.new(0.5, 1)
 		status.Position = UDim2.new(0.5, 0, 1, -10)
 		status.Size = UDim2.fromOffset(190, 18)
-		status.ZIndex = 9
+		-- (above the veil: on a locked crate this is what says how far it is)
+		status.ZIndex = 13
 		status.Parent = inner
 		local veil = UI.mk("Frame", {
 			Name = "Veil", Position = UDim2.fromOffset(8, 8), Size = UDim2.new(1, -16, 1, -16), BackgroundColor3 = Color3.fromRGB(8, 8, 12),
@@ -163,11 +164,11 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 		})
 		local sweep = Kit.shine(frame, 10)
 		b.MouseEnter:Connect(function()
-			if self.zone ~= z.id then Kit.tween(inner, 0.14, { Position = UDim2.fromOffset(8, 0) }, Enum.EasingStyle.Back) end
+			if self.zone ~= z.id then Kit.tween(inner, 0.14, { Position = UDim2.fromOffset(5, 0) }, Enum.EasingStyle.Back) end
 			sweep()
 		end)
 		b.MouseLeave:Connect(function()
-			Kit.tween(inner, 0.14, { Position = UDim2.fromOffset(self.zone == z.id and 10 or 0, 0) })
+			Kit.tween(inner, 0.14, { Position = UDim2.fromOffset(self.zone == z.id and 6 or 0, 0) })
 		end)
 		b.Activated:Connect(function() self:selectZone(z.id) end)
 		self.tabs[z.id] = { button = b, inner = inner, frame = frame, status = status, veil = veil, crate = pic }
@@ -178,7 +179,7 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	-- name, the featured tyre, and under it one switch (pay with cash or keys) and two buttons
 	---------------------------------------------------------------
 	local banner = UI.mk("Frame", { Position = UDim2.fromOffset(250, 54), Size = UDim2.fromOffset(500, 528), BackgroundTransparency = 1, ZIndex = 4, Parent = face })
-	self.bannerRing = Kit.slice("panel_ring", C.purple, banner, 5, 0.4)
+	self.bannerRing = Kit.slice("panel_ring", C.purple, banner, 6, 0.4)
 	local stage = UI.mk("Frame", {
 		Position = UDim2.fromOffset(8, 8), Size = UDim2.new(1, -16, 1, -16), BackgroundColor3 = Color3.fromRGB(20, 20, 24), ClipsDescendants = true,
 		ZIndex = 5, Parent = banner,
@@ -199,8 +200,9 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	self.bannerTitle.Parent = stage
 	self.bannerSub = Kit.text("", 15, C.muted, 1.5, Kit.Body)
 	self.bannerSub.Position = UDim2.fromOffset(16, 54)
-	self.bannerSub.Size = UDim2.new(1, -32, 0, 20)
-	Kit.fit(self.bannerSub, 15, 10)
+	self.bannerSub.Size = UDim2.new(1, -32, 0, 30)
+	self.bannerSub.TextWrapped = true
+	Kit.fit(self.bannerSub, 14, 11)
 	self.bannerSub.ZIndex = 8
 	self.bannerSub.Parent = stage
 	self.bigCrate = UI.mk("ImageLabel", {
@@ -226,7 +228,7 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	self.featRate.ZIndex = 12
 	self.featRate.Parent = feat
 	Kit.plate(stage, "Featured", Game.RaritiesById.Legendary.color, UDim2.new(1, -154, 0, 84), UDim2.fromOffset(128, 26), 12)
-	local test = Kit.button("Test Drive", C.yellow, UDim2.fromOffset(132, 30), 14)
+	local test = Kit.button("Test Drive", C.yellow, UDim2.fromOffset(140, 30), 14)
 	test.root.AnchorPoint = Vector2.new(0.5, 1)
 	test.root.Position = UDim2.new(0.5, 0, 1, -8)
 	test.root.ZIndex = 12
@@ -252,7 +254,7 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	Kit.fit(self.pityText, 13, 9)
 	self.pityText.ZIndex = 9
 	self.pityText.Parent = stage
-	local ptrack, pfill = Kit.bar(420, 14, Game.RaritiesById.Legendary.color)
+	local ptrack, pfill = Kit.bar(460, 14, Game.RaritiesById.Legendary.color)
 	ptrack.AnchorPoint = Vector2.new(0.5, 1)
 	ptrack.Position = UDim2.new(0.5, 0, 1, -70)
 	ptrack.ZIndex = 9
@@ -283,8 +285,8 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	it.ZIndex = 6
 	it.Parent = rates
 	self.compare = Kit.text("", 13, C.muted, 1.5, Kit.Body)
-	self.compare.Position = UDim2.fromOffset(10, 38)
-	self.compare.Size = UDim2.new(1, -20, 0, 32)
+	self.compare.Position = UDim2.fromOffset(8, 38)
+	self.compare.Size = UDim2.new(1, -16, 0, 32)
 	self.compare.TextWrapped = true
 	Kit.fit(self.compare, 13, 9)
 	self.compare.ZIndex = 6
@@ -299,7 +301,7 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	local mut = Kit.text("Any tyre can roll Gold x2, Chrome x3 or Rainbow x5.", 12, C.muted, 1, Kit.Body)
 	mut.AnchorPoint = Vector2.new(0.5, 1)
 	mut.Position = UDim2.new(0.5, 0, 1, -10)
-	mut.Size = UDim2.new(1, -24, 0, 32)
+	mut.Size = UDim2.new(1, -16, 0, 32)
 	mut.TextWrapped = true
 	mut.ZIndex = 6
 	mut.Parent = rates
@@ -310,7 +312,7 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	self.tiles = self.openBtns
 	task.spawn(function()
 		while root.Parent do
-			if root.Visible then self:tickBanner() end
+			if root.Visible and self.shown then self:tickBanner() end
 			task.wait(1)
 		end
 	end)
@@ -343,7 +345,7 @@ function Crates2:selectZone(id: string, instant: boolean?)
 	self.zone = id
 	for zid, t in pairs(self.tabs) do
 		local on = zid == id
-		Kit.tween(t.inner, 0.16, { Position = UDim2.fromOffset(on and 10 or 0, 0) }, Enum.EasingStyle.Back)
+		Kit.tween(t.inner, 0.16, { Position = UDim2.fromOffset(on and 6 or 0, 0) }, Enum.EasingStyle.Back)
 		t.frame.ImageColor3 = if on then Kit.lift(ZONE_LOOK[zid].color, 0.12) else ZONE_LOOK[zid].color
 	end
 	self.bannerRing.ImageColor3 = look.color
@@ -351,7 +353,7 @@ function Crates2:selectZone(id: string, instant: boolean?)
 	self.bigCrate.Image = look.icon
 	if not instant then
 		self.bigCrate.Size = UDim2.fromOffset(170, 170)
-		Kit.tween(self.bigCrate, 0.4, { Size = UDim2.fromOffset(220, 220) }, Enum.EasingStyle.Back)
+		Kit.tween(self.bigCrate, 0.4, { Size = UDim2.fromOffset(210, 210) }, Enum.EasingStyle.Back)
 	end
 	local z = Game.ZonesById[id]
 	self.bannerTitle.Text = string.upper(z.name) .. " CRATE"
@@ -371,7 +373,7 @@ function Crates2:fillInside(zoneId: string)
 	self.insideRows = {}
 	-- each tyre's chance from a cash crate, and from a key crate (Epic and up KeyLuck times)
 	local list, kTotal = {}, 0
-	for _, e in ipairs(Game.crateOdds(zoneId)) do
+	for _, e in ipairs(Game.crateOdds(zoneId, math.floor(workspace:GetServerTimeNow()))) do
 		local t = Game.TyresById[e.id]
 		if t then
 			local kw = e.odds * (if RARITY_ORDER[t.rarity] >= RARITY_ORDER.Epic then Game.Crate.KeyLuck else 1)
@@ -386,9 +388,9 @@ function Crates2:fillInside(zoneId: string)
 	end)
 	for i, e in ipairs(list) do
 		local r = Game.RaritiesById[e.t.rarity]
-		local row = UI.mk("Frame", { Name = e.t.id, Size = UDim2.new(1, -6, 0, 48), BackgroundTransparency = 1, LayoutOrder = i, ZIndex = 7, Parent = box })
+		local row = UI.mk("Frame", { Name = e.t.id, Size = UDim2.new(1, -6, 0, 58), BackgroundTransparency = 1, LayoutOrder = i, ZIndex = 7, Parent = box })
 		Kit.slot(row, r.color, 7)
-		local vp, model = TyreShow.thumb(row, e.t.id, true, UDim2.fromOffset(46, 42), UDim2.new(0, 28, 0, 3))
+		local vp, model = TyreShow.thumb(row, e.t.id, true, UDim2.fromOffset(46, 42), UDim2.new(0, 28, 0, 8))
 		vp.ZIndex = 9
 		local name = Kit.text(e.t.name, 13, C.white, 1.5)
 		name.TextXAlignment = Enum.TextXAlignment.Left
@@ -420,8 +422,10 @@ function Crates2:fillInside(zoneId: string)
 		chance.Parent = row
 		local tag = Kit.text("", 10, C.green, 1.5, Kit.Body)
 		tag.TextXAlignment = Enum.TextXAlignment.Left
-		tag.Position = UDim2.fromOffset(4, 2)
-		tag.Size = UDim2.fromOffset(60, 12)
+		-- under the rarity, clear of the picture and the name
+		tag.Position = UDim2.fromOffset(54, 40)
+		tag.Size = UDim2.fromOffset(86, 12)
+		Kit.fit(tag, 10, 7)
 		tag.ZIndex = 10
 		tag.Parent = row
 		table.insert(self.insideRows, {
@@ -481,8 +485,8 @@ function Crates2:tickBanner()
 		if self.bannerStop then self.bannerStop() end
 		local old = self.bannerBay:FindFirstChild("Featured")
 		if old then old:Destroy() end
-		if self.root.Visible then
-			local vp, stop = Crates2.tyreViewport(self.bannerBay, UDim2.new(1, -16, 1, -50), b.legendary)
+		if self.root.Visible and self.shown then
+			local vp, stop = Crates2.tyreViewport(self.bannerBay, UDim2.new(1, -16, 0, 118), b.legendary)
 			vp.Name = "Featured"
 			vp.Position = UDim2.fromOffset(8, 6)
 			vp.ZIndex = 10
@@ -503,13 +507,13 @@ function Crates2:tickBanner()
 	local span = Game.Crate.BannerHours * 3600
 	local used = v and v.testDrive and math.floor(v.testDrive / span) == math.floor(now / span)
 	if v and v.testArmed then
-		self.testBtn.setText("Ready: next launch")
+		self.testBtn.setText("Armed")
 		self.testBtn.setEnabled(false)
 	elseif used then
-		self.testBtn.setText("Test Drive used")
+		self.testBtn.setText("Used")
 		self.testBtn.setEnabled(false)
 	else
-		self.testBtn.setText("Test Drive: free")
+		self.testBtn.setText("Test Drive")
 		self.testBtn.setEnabled(true)
 	end
 end
@@ -580,12 +584,14 @@ end
 function Crates2:open()
 	Kit.dim(self.gui or self.root.Parent, self, true)
 	Kit.open(self.root)
+	self.shown = true
 	self.shownLegend = nil
 	self:tickBanner()
 end
 
 function Crates2:close()
 	Kit.dim(self.gui or self.root.Parent, self, false)
+	self.shown = false
 	if self.root.Visible then Kit.close_(self.root) end
 	if self.bannerStop then
 		self.bannerStop()
