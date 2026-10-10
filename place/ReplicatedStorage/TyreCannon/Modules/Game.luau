@@ -45,10 +45,10 @@ Game.Zones = {
 	{ id = "backroad", name = "Backroad", start = 0, rate = 0.45, keys = 1,
 		road = Color3.fromRGB(150, 116, 78), verge = Color3.fromRGB(104, 158, 74), ground = Enum.Material.Grass,
 		sky = { clock = 10.5, haze = 1.4, fog = Color3.fromRGB(196, 214, 230) } },
-	{ id = "highway", name = "Highway", start = 1400, rate = 0.72, keys = 2,
+	{ id = "highway", name = "Highway", start = 4000, rate = 0.72, keys = 2,
 		road = Color3.fromRGB(58, 60, 66), verge = Color3.fromRGB(120, 150, 80), ground = Enum.Material.Grass,
 		sky = { clock = 13.0, haze = 1.2, fog = Color3.fromRGB(206, 220, 236) } },
-	{ id = "dunes", name = "Dunes", start = 3600, rate = 1.1, keys = 2,
+	{ id = "dunes", name = "Dunes", start = 12000, rate = 1.1, keys = 2,
 		road = Color3.fromRGB(226, 186, 120), verge = Color3.fromRGB(236, 200, 136), ground = Enum.Material.Sand,
 		sky = { clock = 15.6, haze = 2.0, fog = Color3.fromRGB(240, 212, 170) } },
 }

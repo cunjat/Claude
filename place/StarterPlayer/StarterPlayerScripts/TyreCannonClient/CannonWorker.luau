@@ -1,8 +1,8 @@
 --!strict
 -- TYRE CANNON :: CannonWorker
--- A worker lives in every yard's garage. When the yard's cannon fires he comes out of a back door
--- in the garage wall, walks across to the cannon, hits the button, watches the shot go and walks
--- back in; the door shuts behind him. For your own launch he comes out as the cutscene starts and
+-- A worker lives in every yard's garage. When the yard's cannon fires he fades in beside the
+-- garage (wherever this stage's building actually stands), walks across to the cannon, hits the
+-- button, watches the shot go, walks back and fades out. For your own launch he comes out as the cutscene starts and
 -- goes back in once you're away. Everyone sees every yard's worker (the auto-cannon's shots too).
 --   CannonWorker.new(plot2) -> workers
 --   workers:fire(plot, onFire)   walk out, press, onFire() at the press, walk back
@@ -11,7 +11,6 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 local Root = ReplicatedStorage:WaitForChild("TyreCannon")
 local Game = require(Root:WaitForChild("Modules"):WaitForChild("Game"))
 local Config = require(Root:WaitForChild("Modules"):WaitForChild("Config"))
@@ -23,7 +22,6 @@ CannonWorker.__index = CannonWorker
 local WALK = 13             -- studs a second
 local BUILD_Z = -14         -- the garage's middle along the street edge (PlotStage)
 local WALL_X = -34.5        -- its wall facing into the yard
-local DOOR_W, DOOR_H = 4.2, 7.4
 -- where he stands to fire, in the launcher's own frame (beside it, on the garage side)
 local STAND = CFrame.new(-6, 0, -14)
 
@@ -44,52 +42,29 @@ function CannonWorker.new(plot2)
 	return self
 end
 
--- the back door in the garage wall: a frame and a panel on a hinge (built once per yard)
-function CannonWorker:door(plot: Instance, base: CFrame)
-	local y = self.yards[plot]
-	if y.door and y.door.Parent then return y.door, y.hinge, y.panel end
-	local m = Instance.new("Model")
-	m.Name = "WorkerDoor"
-	local at = base * CFrame.new(WALL_X + 0.15, 2, BUILD_Z) * CFrame.Angles(0, math.pi / 2, 0)
-	local function part(name: string, size: Vector3, cf: CFrame, color: Color3, mat: Enum.Material): Part
-		local p = Instance.new("Part")
-		p.Name = name
-		p.Anchored = true
-		p.CanCollide = false
-		p.CanQuery = false
-		p.CanTouch = false
-		p.Size = size
-		p.CFrame = cf
-		p.Color = color
-		p.Material = mat
-		p.Parent = m
-		return p
+-- where he appears and leaves: just into the yard from the side of the stage's building that faces
+-- it, level with the building's middle (from its real bounds, so it lines up with every stage)
+local BUILDINGS = { TarpShack = true, ScrapShed = true, GarageBay = true }
+function CannonWorker:home(plot: Instance, base: CFrame): CFrame
+	local stage = plot:FindFirstChild("Stage")
+	if stage then
+		for _, m in ipairs(stage:GetChildren()) do
+			if m:IsA("Model") and BUILDINGS[m.Name] then
+				local cf, size = m:GetBoundingBox()
+				local lc = base:ToObjectSpace(cf)
+				-- the box's corners in plot space: the yard side is the largest x
+				local maxX, z = -math.huge, lc.Position.Z
+				for sx = -1, 1, 2 do
+					for sz = -1, 1, 2 do
+						local p = lc:PointToWorldSpace(Vector3.new(size.X / 2 * sx, 0, size.Z / 2 * sz))
+						maxX = math.max(maxX, p.X)
+					end
+				end
+				return CFrame.new(maxX + 3, 2, z)
+			end
+		end
 	end
-	-- the dark doorway, its frame, and the panel hung on its left post
-	part("Opening", Vector3.new(DOOR_W, DOOR_H, 0.2), at * CFrame.new(0, DOOR_H / 2, 0.1), Color3.fromRGB(16, 16, 18), Enum.Material.SmoothPlastic)
-	part("FrameL", Vector3.new(0.4, DOOR_H + 0.4, 0.5), at * CFrame.new(-DOOR_W / 2 - 0.2, DOOR_H / 2, 0), Color3.fromRGB(70, 72, 78), Enum.Material.Metal)
-	part("FrameR", Vector3.new(0.4, DOOR_H + 0.4, 0.5), at * CFrame.new(DOOR_W / 2 + 0.2, DOOR_H / 2, 0), Color3.fromRGB(70, 72, 78), Enum.Material.Metal)
-	part("FrameTop", Vector3.new(DOOR_W + 0.8, 0.4, 0.5), at * CFrame.new(0, DOOR_H + 0.2, 0), Color3.fromRGB(70, 72, 78), Enum.Material.Metal)
-	local hinge = at * CFrame.new(-DOOR_W / 2, 0, -0.15)
-	local panel = part("Panel", Vector3.new(DOOR_W, DOOR_H, 0.25), hinge * CFrame.new(DOOR_W / 2, DOOR_H / 2, 0), Color3.fromRGB(176, 96, 52), Enum.Material.Metal)
-	m.PrimaryPart = panel
-	m.Parent = plot
-	y.door, y.hinge, y.panel = m, hinge, panel
-	return m, hinge, panel
-end
-
--- swing the door open (a quarter turn out into the yard) or shut
-function CannonWorker:swing(plot: Instance, open: boolean)
-	local y = self.yards[plot]
-	if not (y and y.panel and y.hinge) then return end
-	local hinge: CFrame = y.hinge
-	local target = hinge * CFrame.Angles(0, if open then -math.rad(100) else 0, 0) * CFrame.new(DOOR_W / 2, DOOR_H / 2, 0)
-	local cv = Instance.new("CFrameValue")
-	cv.Value = y.panel.CFrame
-	cv.Changed:Connect(function(v) if y.panel then y.panel.CFrame = v end end)
-	local tw = TweenService:Create(cv, TweenInfo.new(0.32, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Value = target })
-	tw.Completed:Connect(function() cv:Destroy() end)
-	tw:Play()
+	return CFrame.new(WALL_X + 3, 2, BUILD_Z)
 end
 
 -- the worker himself: the yard's operator, standing in the doorway, hidden until he steps out
@@ -121,8 +96,8 @@ function CannonWorker:spawn(plot: Instance, base: CFrame): Model?
 	hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
 	m.PrimaryPart = hrp
 	local _, size = m:GetBoundingBox()
-	local door = base * CFrame.new(WALL_X - 0.6, 2 + size.Y / 2, BUILD_Z)
-	m:PivotTo(door * CFrame.Angles(0, -math.pi / 2, 0))
+	local home = base * self:home(plot, base) * CFrame.new(0, size.Y / 2, 0)
+	m:PivotTo(home * CFrame.Angles(0, -math.pi / 2, 0))
 	m.Parent = plot
 	return m
 end
@@ -186,7 +161,6 @@ function CannonWorker:goOut(plot: Instance): Model?
 	if typeof(base) ~= "CFrame" or plot:GetAttribute("V2_Tier") == nil then return nil end
 	local y = self:yard(plot)
 	y.outDone = false
-	self:door(plot, base)
 	local m = self:spawn(plot, base)
 	if not m then return nil end
 	y.worker = m
@@ -195,9 +169,8 @@ function CannonWorker:goOut(plot: Instance): Model?
 	y.walkTrack = load(animator :: Animator, Config.Animations.walk, true)
 	y.idleTrack = load(animator :: Animator, Config.Animations.idle, true)
 	y.pressTrack = load(animator :: Animator, Config.Animations.land, false)
-	self:swing(plot, true)
+	fadeIn(m, true, 0.35)
 	task.wait(0.2)
-	fadeIn(m, true, 0.25)
 	if y.walkTrack then y.walkTrack:Play(0.15) end
 	local stand, cannon = self:spotFor(plot, base)
 	walk(m, stand, cannon)
@@ -218,13 +191,12 @@ function CannonWorker:goBack(plot: Instance)
 	end
 	if y.idleTrack then y.idleTrack:Stop(0.2) end
 	if y.walkTrack then y.walkTrack:Play(0.15) end
-	local door = (base * CFrame.new(WALL_X - 0.6, 2, BUILD_Z)).Position
-	walk(m, (base * CFrame.new(WALL_X + 2.5, 2, BUILD_Z)).Position)
-	fadeIn(m, false, 0.25)
-	walk(m, door)
+	walk(m, (base * self:home(plot, base)).Position)
+	if y.walkTrack then y.walkTrack:Stop(0.2) end
+	fadeIn(m, false, 0.35)
+	task.wait(0.4)
 	m:Destroy()
 	y.worker = nil
-	self:swing(plot, false)
 	y.busy = false
 end
 

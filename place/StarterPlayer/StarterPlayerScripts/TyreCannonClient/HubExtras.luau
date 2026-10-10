@@ -490,6 +490,16 @@ function HubExtras:showDaily(v)
 	claim.root.ZIndex = 6
 	claim.root.Parent = face
 	Kit.pop(box, 0.6, 0.35)
+	-- the X: close it without claiming (the DAILY button under your keys brings it back)
+	local x = Kit.close(48)
+	x.root.AnchorPoint = Vector2.new(0.5, 0.5)
+	x.root.Position = UDim2.new(1, -8, 0, 8)
+	x.root.ZIndex = 80
+	x.root.Parent = box
+	x.onClick = function()
+		Kit.dim(self.gui, box, false)
+		Kit.vanish(box, 0.18, function() box:Destroy() end)
+	end
 	claim.onClick = function()
 		local f = self.R:FindFirstChild("Daily") :: RemoteFunction?
 		local ok, res = pcall(function() return f and f:InvokeServer() end)

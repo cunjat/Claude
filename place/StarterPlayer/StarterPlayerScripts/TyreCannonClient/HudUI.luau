@@ -21,7 +21,9 @@ local Kit = require(script.Parent.Kit)
 local C = Kit.C
 local P = Config.Physics
 local B = Config.Run
-local GATES = Config.Difficulty.Checkpoints
+-- the zone lines, in studs (the rail runs zone to zone; Config's checkpoints are difficulty only)
+local GATES = {}
+for i = 2, #Game.Zones do GATES[i - 1] = Game.Zones[i].start / Game.StudsToMetres end
 
 local HudUI = {}
 HudUI.__index = HudUI

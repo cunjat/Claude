@@ -439,7 +439,7 @@ function Track:objectsForChunk(ci: number)
 	-- the road (v3): one lane. Smashables and pads sit on it between the target slots; no quirk icons
 	if self.isRoad then
 		local M = Game.StudsToMetres
-		local function smash(key: string, x: number)
+		local function smash(key: string, x: number, zAt: number?)
 			-- never a hay bale: that's a bounce target on the road, and the two must never look alike
 			local def = obstacleSet[rng:NextInteger(1, #obstacleSet)]
 			for _ = 1, 4 do
@@ -449,7 +449,7 @@ function Track:objectsForChunk(ci: number)
 			if def.kind == "haybale" then def = OBSTACLE_SETS.fields[2] end
 			local scale = rng:NextNumber(0.8, 1.05)
 			table.insert(out.obstacles, {
-				key = key, x = x, z = rng:NextNumber(-3, 3), y = self:heightAt(x),
+				key = key, x = x, z = zAt or rng:NextNumber(-3, 3), y = self:heightAt(x),
 				kind = def.kind, w = def.w * scale, h = def.h * scale, d = def.d * scale,
 				loss = def.loss, color = def.color, mat = def.mat,
 				model = def.model, folder = def.folder, runModel = def.runModel, breaks = def.breaks, scale = scale,
@@ -469,13 +469,25 @@ function Track:objectsForChunk(ci: number)
 		end
 		if OPENING.pad / M >= x0 and OPENING.pad / M < x1 then pad(ci .. ":op", OPENING.pad / M) end
 		if x1 > OPENING_END then
-			if rng:NextNumber() < 0.5 then
-				local x = x0 + rng:NextNumber(130, 165)
-				if x > OPENING_END then smash(ci .. ":o1", x) end
-				if rng:NextNumber() < 0.4 and x + 10 > OPENING_END then smash(ci .. ":o2", x + 9) end
+			-- sporadic, not a beat: a slow "busy-ness" along the road leaves some stretches bare and
+			-- clusters others, and each piece lands anywhere along the chunk and across the lane
+			local busy = math.clamp((math.noise(ci * 0.29, (self.runSeed % 977) * 0.013, 0.5) + 0.5), 0, 1)
+			local n = 0
+			if rng:NextNumber() < 0.15 + busy * 0.6 then
+				n = 1
+				if rng:NextNumber() < busy * 0.55 then n += 1 end
+				if rng:NextNumber() < busy * 0.25 then n += 1 end
 			end
-			if rng:NextNumber() < 0.22 then
-				local x = x0 + rng:NextNumber(135, 165)
+			local cx = x0 + rng:NextNumber(30, CHUNK - 30)
+			local cz = rng:NextNumber(-half * 0.45, half * 0.45)
+			for k = 1, n do
+				-- a cluster sits round one spot; a lone one anywhere
+				local x = if n > 1 then cx + rng:NextNumber(-34, 34) else x0 + rng:NextNumber(15, CHUNK - 15)
+				local z = if n > 1 then cz + rng:NextNumber(-18, 18) else rng:NextNumber(-half * 0.55, half * 0.55)
+				if x > OPENING_END and x > x0 and x < x1 then smash(ci .. ":o" .. k, x, z) end
+			end
+			if rng:NextNumber() < 0.2 then
+				local x = x0 + rng:NextNumber(20, CHUNK - 20)
 				if x > OPENING_END then pad(ci .. ":d1", x) end
 			end
 		end

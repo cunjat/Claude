@@ -550,6 +550,12 @@ hub2 = Hub2.new(gui, V2, {
 	events = function() togglePanel(eventsPanel) end,
 	bench = function() togglePanel(bench) end,
 	settings = function() togglePanel(settings2) end,
+	daily = function()
+		if hubX and profile and profile.v2 and not hubX:isDailyOpen() then
+			closePanels()
+			hubX:showDaily(profile.v2)
+		end
+	end,
 })
 if profile then hub2:setProfile(profile) end
 hubX = HubExtras.new(gui, V2, {

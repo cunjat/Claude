@@ -180,6 +180,8 @@ function RunSim.start(opts)
 	local spd = opts.launchSpeed or 260
 	local startX = math.max(0, tonumber(opts.startX) or 0)
 	self.x, self.z = startX, 0
+	-- the zone you start in (no banner for it)
+	if self.track.isRoad then self.zone = self.track:zoneIndex(startX) end
 	self.y = self.track:heightAt(startX) + P.TyreRadius + 26
 
 	-- the flight (v3.1): a heading (yaw about the road's +X axis, + is to the right; and pitch), a
@@ -1175,20 +1177,23 @@ function RunSim:step(dt: number)
 	self.multIntegral += (self.combo * mods.creditMult) * dt
 	self.roll += (self.speed / R) * dt
 
-	-- a zone line
+	-- a difficulty tier (quiet: it only times the splits)
 	local tier = Config.TierAt(self.x)
 	if tier > (self.tier or 0) then
 		self.tier = tier
-		local cp2 = Config.Difficulty.Checkpoints[tier]
-		if cp2 then self.world:gateFX(Vector3.new(cp2, track:heightAt(cp2) + 18, self.z)) end
+		self.splits[tier] = math.floor(self.runTime * 10 + 0.5) / 10
+	end
+	-- a zone line: the gate, the banner, the new world
+	local zi = if self.track.isRoad then self.track:zoneIndex(self.x) else self.zone
+	if zi > (self.zone or 1) then
+		self.zone = zi
+		local zone = Game.Zones[zi]
+		local line = self.track:zoneStart(zi)
+		self.world:gateFX(Vector3.new(line, track:heightAt(line) + 18, self.z))
 		self.gateLean = 1
 		self.shake = math.min(3, self.shake + 0.8)
-		self.splits[tier] = math.floor(self.runTime * 10 + 0.5) / 10
 		Sound.play("gateWhoosh")
 		local bestSplit = self.ghost and self.ghost.splits[tier] or nil
-		local zi = self.track:zoneIndex(self.x)
-		self.zone = zi
-		local zone = self.track.isRoad and Game.Zones[zi] or nil
 		if zone then self.dust.Color = ColorSequence.new(self.track:cfgAt(self.x).ground) end
 		self.onEvent({ kind = "checkpoint", tier = tier, metres = self.x * P.StudsToMetres, split = self.runTime, bestSplit = bestSplit,
 			zone = zi, zoneName = zone and zone.name or nil })

@@ -161,44 +161,38 @@ function Workbench:buildTyres(page: Frame)
 	seg.ZIndex = 8
 	seg.Parent = page
 	self.setSort = set
-	local allLabel = Kit.text("All tyres", 15, C.text, 2, Kit.Body)
-	allLabel.AnchorPoint = Vector2.new(1, 0)
-	allLabel.Position = UDim2.new(1, -96, 0, 40)
-	allLabel.Size = UDim2.fromOffset(120, 22)
-	allLabel.TextXAlignment = Enum.TextXAlignment.Right
-	allLabel.ZIndex = 8
-	allLabel.Parent = page
-	local allTog = Kit.toggle(false, function(v)
-		self.showAll = v
-		self:renderGrid()
-	end)
-	allTog.AnchorPoint = Vector2.new(1, 0)
-	allTog.Position = UDim2.new(1, 0, 0, 34)
-	allTog.ZIndex = 8
-	allTog.Parent = page
-	local favLabel = Kit.text("Favourites only", 15, C.text, 2, Kit.Body)
-	favLabel.AnchorPoint = Vector2.new(1, 0)
-	favLabel.Position = UDim2.new(1, -96, 0, 0)
-	favLabel.Size = UDim2.fromOffset(120, 36)
-	favLabel.TextXAlignment = Enum.TextXAlignment.Right
-	favLabel.ZIndex = 8
-	favLabel.Parent = page
-	local tog = Kit.toggle(false, function(v)
+	-- two switches on their own rows, right-aligned, each label centred on its switch
+	local function switchRow(y: number, text: string, onChange: (boolean) -> ())
+		local l = Kit.text(text, 15, C.text, 2, Kit.Body)
+		l.AnchorPoint = Vector2.new(1, 0.5)
+		l.Position = UDim2.new(1, -96, 0, y + 20)
+		l.Size = UDim2.fromOffset(150, 22)
+		l.TextXAlignment = Enum.TextXAlignment.Right
+		l.ZIndex = 8
+		l.Parent = page
+		local tog = Kit.toggle(false, onChange)
+		tog.AnchorPoint = Vector2.new(1, 0)
+		tog.Position = UDim2.new(1, 0, 0, y)
+		tog.ZIndex = 8
+		tog.Parent = page
+	end
+	switchRow(0, "Favourites only", function(v)
 		self.favOnly = v
 		self:renderGrid()
 	end)
-	tog.AnchorPoint = Vector2.new(1, 0)
-	tog.Position = UDim2.new(1, 0, 0, -2)
-	tog.ZIndex = 8
-	tog.Parent = page
+	switchRow(48, "All tyres", function(v)
+		self.showAll = v
+		self:renderGrid()
+	end)
 	self.count = Kit.text("", 14, C.muted, 1.5, Kit.Body)
-	self.count.Position = UDim2.fromOffset(0, 42)
+	self.count.AnchorPoint = Vector2.new(0, 0.5)
+	self.count.Position = UDim2.fromOffset(2, 68)
 	self.count.Size = UDim2.fromOffset(300, 18)
 	self.count.TextXAlignment = Enum.TextXAlignment.Left
 	self.count.ZIndex = 8
 	self.count.Parent = page
 	self.grid = UI.mk("ScrollingFrame", {
-		Position = UDim2.fromOffset(0, 64), Size = UDim2.fromOffset(564, 392), BackgroundTransparency = 1, BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, 96), Size = UDim2.fromOffset(564, 360), BackgroundTransparency = 1, BorderSizePixel = 0,
 		ScrollBarThickness = 6, ScrollBarImageColor3 = C.line, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(), ZIndex = 7, Parent = page,
 	})
 	UI.mk("UIGridLayout", { CellSize = UDim2.fromOffset(Tyres2.CELL.X, Tyres2.CELL.Y), CellPadding = UDim2.fromOffset(10, 12), SortOrder = Enum.SortOrder.LayoutOrder, Parent = self.grid })

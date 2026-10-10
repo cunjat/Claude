@@ -55,6 +55,14 @@ function Hub2.new(gui: ScreenGui, remotes: Instance, actions)
 	kh.Parent = money
 	self.keyText = kl
 	self.keyBox = kh
+	-- the login reward, while it's waiting to be claimed (closing its card doesn't lose it)
+	local daily = Kit.button("Daily Reward", C.yellow, UDim2.fromOffset(150, 34), 15)
+	daily.root.Position = UDim2.fromOffset(0, 112)
+	daily.root.Visible = false
+	daily.root.Parent = money
+	daily.onClick = function() if actions.daily then actions.daily() end end
+	self.dailyBtn = daily
+	money.Size = UDim2.fromOffset(240, 150)
 
 	-- the side menu: where you go
 	local side = UI.mk("Frame", { AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 30, 0.6, 0), Size = UDim2.fromOffset(220, 360), BackgroundTransparency = 1, Parent = root })
@@ -242,6 +250,9 @@ function Hub2:setProfile(p)
 	end
 	self.keyText.Text = tostring(v.keys)
 	if prevKeys and v.keys > prevKeys then Kit.pop(self.keyBox, 0.6, 0.3) end
+	local ready = v.daily ~= nil and v.daily.last ~= Game.utcDay(math.floor(workspace:GetServerTimeNow()))
+	if ready and not self.dailyBtn.root.Visible then Kit.pop(self.dailyBtn.root, 0.7, 0.3) end
+	self.dailyBtn.root.Visible = ready
 	-- the Crates tile shows the crate of the furthest zone you've unlocked
 	do
 		local best = "backroad"
