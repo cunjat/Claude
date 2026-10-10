@@ -97,6 +97,17 @@ local function plotSnapshot()
 				trail = pr and pr.trail or "none",
 				pressure = pr and pr.pressure or 50,
 				best = pr and math.floor(pr.lifetime.bestDistance * Config.Physics.StudsToMetres) or 0,
+				-- the launch tyre, for VIEW WHEEL on the yard's sign
+				wheel = (function()
+					local v = pr and pr.v2
+					if not v then return nil end
+					for _, t in ipairs(v.inv) do
+						if t.uid == v.launch then
+							return { id = t.id, forge = t.forge or 0, mut = t.mut, design = v.designs and v.designs[tostring(t.uid)] or nil }
+						end
+					end
+					return nil
+				end)(),
 			}
 		else
 			out[i] = false

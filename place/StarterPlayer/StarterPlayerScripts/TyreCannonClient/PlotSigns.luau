@@ -301,6 +301,15 @@ function PlotSigns:buildBoard(anchor: BasePart)
 	spec.root.Parent = gui
 	spec.onClick = function() self:pressSpectate(node) end
 	node.tab = spec.root
+	-- VIEW WHEEL: the owner's launch tyre, up close
+	local view = Kit.button("View Wheel", Kit.C.blue, UDim2.fromOffset(150, 30), 15)
+	view.root.AnchorPoint = Vector2.new(0.5, 0)
+	view.root.Position = UDim2.new(0.5, 0, 0, 102)
+	view.root.Visible = false
+	view.root.Parent = gui
+	view.onClick = function() self:pressView(node) end
+	node.viewTab = view.root
+	gui.Size = UDim2.fromOffset(240, 136)
 	return node
 end
 
@@ -357,6 +366,19 @@ function PlotSigns:apply(snapshot)
 			-- the tab only exists while there is something to watch, and never
 			-- over your own plot
 			b.tab.Visible = (info.status == "attempt") and info.userId ~= self.myUserId
+			-- VIEW WHEEL on every owned yard; beside SPECTATE when that's up
+			if b.viewTab then
+				b.viewTab.Visible = true
+				if b.tab.Visible then
+					b.tab.Size = UDim2.fromOffset(114, 30)
+					b.tab.Position = UDim2.new(0.5, -59, 0, 102)
+					b.viewTab.Size = UDim2.fromOffset(114, 30)
+					b.viewTab.Position = UDim2.new(0.5, 59, 0, 102)
+				else
+					b.viewTab.Size = UDim2.fromOffset(150, 30)
+					b.viewTab.Position = UDim2.new(0.5, 0, 0, 102)
+				end
+			end
 
 			if b.userId ~= info.userId then
 				b.userId = info.userId
@@ -389,6 +411,7 @@ function PlotSigns:apply(snapshot)
 			b.pill.Visible = false
 			b.pres.Visible = false
 			b.tab.Visible = false
+			if b.viewTab then b.viewTab.Visible = false end
 			if b.ring then b.ring.ImageColor3 = Color3.fromRGB(110, 116, 130) end
 		end
 	end

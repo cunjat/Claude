@@ -21,6 +21,7 @@ local Game = require(Modules.Game)
 local UI = require(script.Parent.UI)
 local Kit = require(script.Parent.Kit)
 local TyreLook = require(script.Parent.TyreLook)
+local TyreShow = require(script.Parent.TyreShow)
 local C = Kit.C
 
 local Crates2 = {}
@@ -108,13 +109,32 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	close.root.ZIndex = 40
 	close.root.Parent = root
 	close.onClick = function() self:close() end
-	local keyChip, keyText = Kit.chip(Kit.Icon.key, C.gold, 120)
-	keyChip.AnchorPoint = Vector2.new(1, 0)
-	keyChip.Position = UDim2.new(1, -60, 0, 2)
-	keyChip.Size = UDim2.fromOffset(120, 44)
-	keyChip.ZIndex = 6
+	-- the top line, level with the title: the banner's clock, then your keys (a smaller counter,
+	-- its middle on the panel's top edge like the title's)
+	local keyChip, keyText = Kit.chip(Kit.Icon.key, nil, 112)
+	keyChip.AnchorPoint = Vector2.new(1, 0.5)
+	keyChip.Position = UDim2.new(1, -62, 0, 8)
+	keyChip.ZIndex = 9
 	keyChip.Parent = face
+	UI.mk("UIScale", { Scale = 0.82, Parent = keyChip })
+	for _, d in ipairs(keyChip:GetDescendants()) do
+		if d:IsA("GuiObject") then d.ZIndex = math.max(d.ZIndex, 9) end
+	end
+	local keyIcon = keyChip:FindFirstChild("Icon") :: ImageLabel?
+	if keyIcon then
+		-- the key sits inside the counter's left end instead of hanging off it
+		keyIcon.Position = UDim2.new(0, 22, 0.5, 0)
+		keyIcon.Size = UDim2.fromOffset(40, 40)
+	end
 	self.keysText = keyText
+	self.bannerClock = Kit.text("", 15, C.text, 2, Kit.Body)
+	self.bannerClock.AnchorPoint = Vector2.new(1, 0.5)
+	self.bannerClock.TextXAlignment = Enum.TextXAlignment.Right
+	self.bannerClock.Position = UDim2.new(1, -170, 0, 8)
+	self.bannerClock.Size = UDim2.fromOffset(440, 20)
+	Kit.fit(self.bannerClock, 15, 10)
+	self.bannerClock.ZIndex = 9
+	self.bannerClock.Parent = face
 
 	---------------------------------------------------------------
 	-- the banner tabs down the left: one a crate, its picture, its name, what it costs
@@ -181,12 +201,12 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	}, { UI.corner(10) })
 	self.stage2 = stage
 	self.stageGlow = UI.mk("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.36), Size = UDim2.fromScale(1.3, 1.1), BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(168, 196), Size = UDim2.fromScale(1.1, 1.0), BackgroundTransparency = 1,
 		Image = Kit.Art.glow, ImageColor3 = C.purple, ImageTransparency = 0.35, ZIndex = 5, Parent = stage,
 	})
 	-- slow rays turning behind the crate
 	self.rays = {}
-	local rays = UI.mk("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.36), Size = UDim2.fromOffset(900, 900), BackgroundTransparency = 1, ZIndex = 5, Parent = stage })
+	local rays = UI.mk("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(168, 196), Size = UDim2.fromOffset(900, 900), BackgroundTransparency = 1, ZIndex = 5, Parent = stage })
 	for k = 1, 10 do
 		local ray = UI.mk("Frame", {
 			AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(46, 450), BackgroundColor3 = C.white,
@@ -207,43 +227,33 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	self.bannerSub.Size = UDim2.new(1, 0, 0, 20)
 	self.bannerSub.ZIndex = 8
 	self.bannerSub.Parent = stage
-	-- the crate itself
+	-- the crate itself, on the left of the stage (the featured bay has the right; they never meet)
 	self.bigCrate = UI.mk("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.36), Size = UDim2.fromOffset(250, 250), BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 168, 0, 196), Size = UDim2.fromOffset(220, 220), BackgroundTransparency = 1,
 		ScaleType = Enum.ScaleType.Fit, ZIndex = 9, Parent = stage,
 	})
 	self.stopBob = Kit.bob(self.bigCrate, 6, 1.6)
-	-- the featured Legendary, in a bay in the corner, with its rate
-	local feat = UI.mk("Frame", { Position = UDim2.new(1, -150, 0, 84), Size = UDim2.fromOffset(136, 160), BackgroundTransparency = 1, ZIndex = 8, Parent = stage })
+	-- the featured Legendary, in a bay on the right, its tag straight above it, Test Drive under it
+	local feat = UI.mk("Frame", { Position = UDim2.new(1, -164, 0, 104), Size = UDim2.fromOffset(148, 168), BackgroundTransparency = 1, ZIndex = 8, Parent = stage })
 	Kit.slot(feat, Game.RaritiesById.Legendary.color, 8)
 	self.bannerBay = feat
 	self.featName = Kit.text("", 14, C.white, 2)
 	self.featName.AnchorPoint = Vector2.new(0.5, 1)
 	self.featName.Position = UDim2.new(0.5, 0, 1, -22)
-	self.featName.Size = UDim2.fromOffset(128, 18)
+	self.featName.Size = UDim2.fromOffset(138, 18)
 	Kit.fit(self.featName, 14, 9)
 	self.featName.ZIndex = 12
 	self.featName.Parent = feat
 	self.featRate = Kit.text("", 12, Game.RaritiesById.Legendary.color, 2, Kit.Body)
 	self.featRate.AnchorPoint = Vector2.new(0.5, 1)
 	self.featRate.Position = UDim2.new(0.5, 0, 1, -6)
-	self.featRate.Size = UDim2.fromOffset(128, 14)
+	self.featRate.Size = UDim2.fromOffset(138, 14)
 	self.featRate.ZIndex = 12
 	self.featRate.Parent = feat
-	local featTag, featTagText = Kit.plate(stage, "Featured", Game.RaritiesById.Legendary.color, UDim2.new(1, -140, 0, 70), UDim2.fromOffset(124, 24), 12)
-	featTag.Rotation = 4
-	local _ = featTagText
-	self.bannerClock = Kit.text("", 13, C.muted, 1.5, Kit.Body)
-	self.bannerClock.AnchorPoint = Vector2.new(0, 1)
-	self.bannerClock.TextXAlignment = Enum.TextXAlignment.Left
-	self.bannerClock.Position = UDim2.new(0, 14, 1, -190)
-	self.bannerClock.Size = UDim2.fromOffset(300, 16)
-	self.bannerClock.ZIndex = 8
-	self.bannerClock.Parent = stage
-	-- Test Drive, small, bottom left of the stage
-	local test = Kit.button("Test Drive", C.yellow, UDim2.fromOffset(150, 34), 15)
-	test.root.AnchorPoint = Vector2.new(0, 1)
-	test.root.Position = UDim2.new(0, 14, 1, -150)
+	Kit.plate(stage, "Featured", Game.RaritiesById.Legendary.color, UDim2.new(1, -154, 0, 84), UDim2.fromOffset(128, 26), 12)
+	local test = Kit.button("Test Drive", C.yellow, UDim2.fromOffset(148, 34), 15)
+	test.root.AnchorPoint = Vector2.new(0, 0)
+	test.root.Position = UDim2.new(1, -164, 0, 280)
 	test.root.ZIndex = 9
 	test.root.Parent = stage
 	test.onClick = function() self:testDrive() end
@@ -280,52 +290,62 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	}
 
 	---------------------------------------------------------------
-	-- the rates down the right: a line a rarity, cash then keys
+	-- the right: what's inside (every tyre the crate can give, in its rarity's well, with its
+	-- chance), then the rates by rarity, short (cash and key side by side; no Secret line)
 	---------------------------------------------------------------
 	local rates = UI.mk("Frame", { Position = UDim2.fromOffset(766, 54), Size = UDim2.fromOffset(212, 528), BackgroundTransparency = 1, ZIndex = 4, Parent = face })
 	Kit.slot(rates, Kit.NEUTRAL, 4)
-	local rt = Kit.text("DROP RATES", 18, C.white, 2.5)
-	rt.Position = UDim2.fromOffset(0, 12)
-	rt.Size = UDim2.new(1, 0, 0, 24)
+	local it = Kit.text("WHAT'S INSIDE", 18, C.white, 2.5)
+	it.Position = UDim2.fromOffset(0, 12)
+	it.Size = UDim2.new(1, 0, 0, 24)
+	it.ZIndex = 6
+	it.Parent = rates
+	self.inside = UI.mk("Frame", { Position = UDim2.fromOffset(10, 42), Size = UDim2.fromOffset(192, 210), BackgroundTransparency = 1, ZIndex = 5, Parent = rates })
+	local rt = Kit.text("DROP RATES", 15, C.white, 2)
+	rt.TextXAlignment = Enum.TextXAlignment.Left
+	rt.Position = UDim2.fromOffset(14, 272)
+	rt.Size = UDim2.fromOffset(100, 20)
 	rt.ZIndex = 6
 	rt.Parent = rates
-	local hdr = Kit.text("CASH        KEY", 12, C.muted, 1.5, Kit.Body)
+	local hdr = Kit.text("CASH     KEY", 12, C.muted, 1.5, Kit.Body)
 	hdr.AnchorPoint = Vector2.new(1, 0)
 	hdr.TextXAlignment = Enum.TextXAlignment.Right
-	hdr.Position = UDim2.new(1, -14, 0, 42)
-	hdr.Size = UDim2.fromOffset(130, 14)
+	hdr.Position = UDim2.new(1, -14, 0, 276)
+	hdr.Size = UDim2.fromOffset(110, 14)
 	hdr.ZIndex = 6
 	hdr.Parent = rates
 	self.rateRows = {}
-	local y = 62
+	local y = 298
 	for _, r in ipairs(Game.Rarities) do
-		local n = Kit.text(r.id, 14, r.color, 1.5)
-		n.TextXAlignment = Enum.TextXAlignment.Left
-		n.Position = UDim2.fromOffset(14, y)
-		n.Size = UDim2.fromOffset(80, 20)
-		n.ZIndex = 6
-		n.Parent = rates
-		local a = Kit.text("", 14, C.text, 1.5)
-		a.AnchorPoint = Vector2.new(1, 0)
-		a.TextXAlignment = Enum.TextXAlignment.Right
-		a.Position = UDim2.new(1, -72, 0, y)
-		a.Size = UDim2.fromOffset(56, 20)
-		a.ZIndex = 6
-		a.Parent = rates
-		local k = Kit.text("", 14, C.gold, 1.5)
-		k.AnchorPoint = Vector2.new(1, 0)
-		k.TextXAlignment = Enum.TextXAlignment.Right
-		k.Position = UDim2.new(1, -12, 0, y)
-		k.Size = UDim2.fromOffset(56, 20)
-		k.ZIndex = 6
-		k.Parent = rates
-		self.rateRows[r.id] = { cash = a, key = k, name = n }
-		y += 24
+		if r.id ~= "Secret" then
+			local n = Kit.text(r.id, 13, r.color, 1.5)
+			n.TextXAlignment = Enum.TextXAlignment.Left
+			n.Position = UDim2.fromOffset(14, y)
+			n.Size = UDim2.fromOffset(80, 18)
+			n.ZIndex = 6
+			n.Parent = rates
+			local a = Kit.text("", 13, C.text, 1.5)
+			a.AnchorPoint = Vector2.new(1, 0)
+			a.TextXAlignment = Enum.TextXAlignment.Right
+			a.Position = UDim2.new(1, -66, 0, y)
+			a.Size = UDim2.fromOffset(52, 18)
+			a.ZIndex = 6
+			a.Parent = rates
+			local k = Kit.text("", 13, C.gold, 1.5)
+			k.AnchorPoint = Vector2.new(1, 0)
+			k.TextXAlignment = Enum.TextXAlignment.Right
+			k.Position = UDim2.new(1, -12, 0, y)
+			k.Size = UDim2.fromOffset(52, 18)
+			k.ZIndex = 6
+			k.Parent = rates
+			self.rateRows[r.id] = { cash = a, key = k, name = n }
+			y += 20
+		end
 	end
-	local mut = Kit.text("Any tyre can roll a mutation: Gold x2, Chrome x3, Rainbow x5.", 13, C.muted, 1, Kit.Body)
+	local mut = Kit.text("Any tyre can roll Gold x2, Chrome x3 or Rainbow x5.", 12, C.muted, 1, Kit.Body)
 	mut.AnchorPoint = Vector2.new(0.5, 1)
-	mut.Position = UDim2.new(0.5, 0, 1, -14)
-	mut.Size = UDim2.new(1, -24, 0, 50)
+	mut.Position = UDim2.new(0.5, 0, 1, -12)
+	mut.Size = UDim2.new(1, -24, 0, 34)
 	mut.TextWrapped = true
 	mut.ZIndex = 6
 	mut.Parent = rates
@@ -367,8 +387,8 @@ function Crates2:selectZone(id: string, instant: boolean?)
 	self.stageGlow.ImageColor3 = look.color
 	self.bigCrate.Image = look.icon
 	if not instant then
-		self.bigCrate.Size = UDim2.fromOffset(190, 190)
-		Kit.tween(self.bigCrate, 0.4, { Size = UDim2.fromOffset(250, 250) }, Enum.EasingStyle.Back)
+		self.bigCrate.Size = UDim2.fromOffset(170, 170)
+		Kit.tween(self.bigCrate, 0.4, { Size = UDim2.fromOffset(220, 220) }, Enum.EasingStyle.Back)
 	end
 	local z = Game.ZonesById[id]
 	self.bannerTitle.Text = string.upper(z.name) .. " CRATE"
@@ -383,7 +403,73 @@ function Crates2:selectZone(id: string, instant: boolean?)
 		row.cash.TextTransparency = dim and 0.6 or 0
 		row.key.TextTransparency = dim and 0.6 or 0
 	end
+	self:fillInside(id)
 	if self.profile then self:setProfile(self.profile) end
+end
+
+-- what's inside a crate: every tyre it can give (not the Secrets), rarest first, each in its
+-- rarity's well with its chance from a cash crate; the banner's Legendary carries its tag
+function Crates2:fillInside(zoneId: string)
+	local box = self.inside
+	if not box then return end
+	for _, c in ipairs(box:GetChildren()) do c:Destroy() end
+	local list = {}
+	for _, e in ipairs(Game.crateOdds(zoneId)) do
+		local t = Game.TyresById[e.id]
+		if t and t.rarity ~= "Secret" then table.insert(list, { t = t, odds = e.odds, featured = e.featured }) end
+	end
+	table.sort(list, function(a, b)
+		local ra, rb = RARITY_ORDER[a.t.rarity], RARITY_ORDER[b.t.rarity]
+		if ra ~= rb then return ra > rb end
+		return a.t.num < b.t.num
+	end)
+	for i, e in ipairs(list) do
+		if i > 9 then break end
+		local r = Game.RaritiesById[e.t.rarity]
+		local cell = UI.mk("Frame", {
+			Name = e.t.id, Position = UDim2.fromOffset(((i - 1) % 3) * 66, ((i - 1) // 3) * 70), Size = UDim2.fromOffset(60, 64),
+			BackgroundTransparency = 1, ZIndex = 6, Parent = box,
+		})
+		Kit.slot(cell, r.color, 6)
+		TyreShow.thumb(cell, e.t.id, true, UDim2.fromOffset(54, 44), UDim2.new(0.5, 0, 0, 3))
+		local p = Kit.text(pct(e.odds), 12, e.featured and C.gold or C.white, 1.5, Kit.Body)
+		p.AnchorPoint = Vector2.new(0.5, 1)
+		p.Position = UDim2.new(0.5, 0, 1, -3)
+		p.Size = UDim2.new(1, -6, 0, 14)
+		Kit.fit(p, 12, 8)
+		p.ZIndex = 9
+		p.Parent = cell
+		if e.featured then
+			local star = Kit.text("★", 16, C.gold, 2)
+			star.AnchorPoint = Vector2.new(0.5, 0.5)
+			star.Position = UDim2.fromOffset(52, 8)
+			star.Size = UDim2.fromOffset(18, 18)
+			star.ZIndex = 10
+			star.Parent = cell
+		end
+		-- hover: the tyre's name over the grid
+		local hit = UI.mk("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 11, Parent = cell })
+		hit.MouseEnter:Connect(function()
+			if self.insideTip then
+				self.insideTip.Text = ("<font color=\"#%s\">%s</font>  %s"):format(r.color:ToHex(), string.upper(r.id), e.t.name)
+			end
+		end)
+		hit.MouseLeave:Connect(function()
+			if self.insideTip then self.insideTip.Text = "" end
+		end)
+	end
+	if not self.insideTip then
+		-- under the grid: the name of the tyre you're pointing at
+		local tip = Kit.text("", 12, C.text, 1.5, Kit.Body)
+		tip.AnchorPoint = Vector2.new(0.5, 0)
+		tip.Position = UDim2.fromOffset(106, 252)
+		tip.Size = UDim2.fromOffset(200, 16)
+		Kit.fit(tip, 12, 8)
+		tip.ZIndex = 9
+		tip.Parent = box.Parent
+		self.insideTip = tip
+	end
+	self.insideTip.Text = ""
 end
 
 function Crates2:setCount(n: number)
@@ -398,6 +484,8 @@ function Crates2:tickBanner()
 	local myth = Game.TyresById[b.mythic]
 	if b.legendary ~= self.shownLegend then
 		self.shownLegend = b.legendary
+		-- a new banner changes what's inside
+		self:fillInside(self.zone)
 		if self.bannerStop then self.bannerStop() end
 		local old = self.bannerBay:FindFirstChild("Featured")
 		if old then old:Destroy() end

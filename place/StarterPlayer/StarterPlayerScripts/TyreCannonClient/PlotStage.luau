@@ -403,24 +403,8 @@ function PlotStage:build(plot: Instance)
 				if mast then lampLight(mast, f, 60, Color3.fromRGB(255, 248, 236)) end
 			end
 		end
-	else
-		-- a free plot: a board on a post at the street side
-		local post = Instance.new("Part")
-		post.Anchored = true
-		post.Material = Enum.Material.Wood
-		post.Color = Color3.fromRGB(110, 78, 50)
-		post.Size = Vector3.new(0.6, 9, 0.6)
-		post.CFrame = base * CFrame.new(FLOOR.x0 - 3, 4.5, BUILD_Z)
-		post.Parent = f
-		signBoard(f, base * CFrame.new(FLOOR.x0 - 3.4, 8, BUILD_Z) * FACE_STREET, Vector2.new(9, 3), "TO LET", "walk in to claim")
-		local board = Instance.new("Part")
-		board.Anchored = true
-		board.Material = Enum.Material.Wood
-		board.Color = Color3.fromRGB(226, 208, 168)
-		board.Size = Vector3.new(0.3, 3.2, 9.4)
-		board.CFrame = base * CFrame.new(FLOOR.x0 - 3.25, 8, BUILD_Z)
-		board.Parent = f
 	end
+	-- (a free plot has no To Let board: the claim pad says it all)
 	if scene then
 		-- (until its turn the new stage sits under the ground; rise puts each piece back where it was built)
 		local rest: { [Instance]: CFrame } = {}

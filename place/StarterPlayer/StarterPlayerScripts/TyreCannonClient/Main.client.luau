@@ -57,6 +57,7 @@ local PlotStage = require(script.Parent.PlotStage)
 local HubExtras = require(script.Parent.HubExtras)
 local LaunchArcs = require(script.Parent.LaunchArcs)
 local Rivals = require(script.Parent.Rivals)
+local WheelView = require(script.Parent.WheelView)
 local T = UI.Theme
 
 --==============================================================
@@ -92,6 +93,8 @@ local crates2 = Crates2.new(gui, V2)
 local tyres2 = Tyres2.new(gui, V2)
 local settings2 = Settings2.new(gui, function() anims:victory() end)
 local bench = Workbench.new(gui, V2)
+-- VIEW WHEEL on a yard's sign
+local wheelView = WheelView.new(gui)
 local hub2
 -- the zone the next run starts in (picked on the zone map; the server checks you've reached it)
 local zonePick = "backroad"
@@ -112,7 +115,7 @@ local eventsPanel = {
 	open = function() if hubX then hubX:openEvents(true) end end,
 }
 -- every panel the hub steps aside for
-local PANELS = { plot2, crates2, tyres2, zoneMap, shopPanel, eventsPanel, settings2, bench }
+local PANELS = { plot2, crates2, tyres2, zoneMap, shopPanel, eventsPanel, settings2, bench, wheelView }
 local function closePanels(except: any?)
 	for _, panel in ipairs(PANELS) do
 		if panel ~= except and panel:isOpen() then panel:close() end
@@ -240,11 +243,24 @@ local function setCharacterActive(active: boolean)
 	end
 end
 
+-- the last plot snapshot from the server (who owns which yard)
+local lastSnapshot = nil
 local function setPromptsEnabled(on: boolean)
 	local lobby = workspace:FindFirstChild("Lobby")
 	if not lobby then return end
 	for _, d in ipairs(lobby:GetDescendants()) do
-		if d:IsA("ProximityPrompt") then d.Enabled = on end
+		if d:IsA("ProximityPrompt") then
+			-- a yard's claim prompt only comes back while that yard is free
+			local pad = d.Parent
+			if pad and pad.Name == "ClaimPad" then
+				local plot = pad.Parent
+				local idx = plot and plot:GetAttribute("Index")
+				local taken = idx ~= nil and lastSnapshot ~= nil and type(lastSnapshot[idx]) == "table"
+				d.Enabled = on and not taken
+			else
+				d.Enabled = on
+			end
+		end
 	end
 end
 
@@ -702,7 +718,6 @@ end)
 --==============================================================
 -- plots
 --==============================================================
-local lastSnapshot = nil
 local plotsReady = false
 
 local function onPlots(snapshot)
@@ -748,6 +763,11 @@ Remotes.PlotsUpdated.OnClientEvent:Connect(onPlots)
 task.spawn(function()
 	local plots = PlotSigns.waitForPlots(8, 30)
 	signs = PlotSigns.new(function(userId, name) startSpectating(userId, name) end)
+	signs.onView = function(_index: number, info)
+		if state ~= "hub" then return end
+		closePanels(wheelView)
+		wheelView:open(info)
+	end
 	if plots then
 		-- no launch lever: the run starts from the hub
 		for _, plot in ipairs(plots:GetChildren()) do

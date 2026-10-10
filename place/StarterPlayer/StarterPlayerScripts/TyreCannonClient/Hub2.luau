@@ -75,6 +75,17 @@ function Hub2.new(gui: ScreenGui, remotes: Instance, actions)
 		self.dock[string.upper(it[1])] = b
 		Kit.appear(b.root, 0.05 * i, 14)
 	end
+	-- the Shop's icon is gone (it didn't look right): its name sits in the middle of the tile instead
+	do
+		local shopHolder = self.dock.SHOP.root:FindFirstChild("Holder")
+		local shopIcon = shopHolder and shopHolder:FindFirstChild("Icon") :: ImageLabel?
+		if shopIcon then shopIcon.Image = "" end
+		local l = self.dock.SHOP.label
+		l.AnchorPoint = Vector2.new(0.5, 0.5)
+		l.Position = UDim2.fromScale(0.5, 0.5)
+		l.Size = UDim2.new(1, -8, 0, 30)
+		Kit.fit(l, 26)
+	end
 	self.plotBadge = badge(self.dock.PLOT, C.green, "!")
 
 	-- the corner: the Events tab, and under it the Workbench and Settings
@@ -84,13 +95,59 @@ function Hub2.new(gui: ScreenGui, remotes: Instance, actions)
 	local events = Kit.tab("Events", UDim2.fromOffset(176, 36), false)
 	events.root.Position = UDim2.fromOffset(0, 0)
 	events.root.Parent = corner
-	events.onClick = function() if actions.events then actions.events() end end
+	-- the flag rides on the tab's face (so it lifts with it on hover), on a pole at its left
+	local evHolder = events.root:FindFirstChild("Holder") :: Frame
 	local evIcon = UI.mk("ImageLabel", {
-		AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 8, 0.5, 0), Size = UDim2.fromOffset(math.floor(34 * Kit.IconScale), math.floor(34 * Kit.IconScale)),
-		BackgroundTransparency = 1, Image = Kit.Icon.event, ZIndex = 8, Parent = events.root,
+		AnchorPoint = Vector2.new(0.2, 0.9), Position = UDim2.new(0, 14, 0.5, 14), Size = UDim2.fromOffset(math.floor(40 * Kit.IconScale), math.floor(40 * Kit.IconScale)),
+		BackgroundTransparency = 1, Image = Kit.Icon.event, ZIndex = 8, Parent = evHolder,
 	})
 	evIcon.Name = "EventIcon"
+	-- the label leaves room for the flag and carries the countdown
+	events.label.Position = UDim2.new(0.5, 14, 0.5, -1)
+	events.label.Size = UDim2.new(1, -56, 1, -12)
 	self.eventsTab = events
+	self.eventFlag = evIcon
+	-- the flag waves: a few flaps on hover, one big flap on a click, and all the time while an event's on
+	local waveUntil = 0
+	events.root.MouseEnter:Connect(function() waveUntil = math.max(waveUntil, os.clock() + 0.9) end)
+	events.onClick = function()
+		waveUntil = math.max(waveUntil, os.clock() + 0.6)
+		Kit.pop(evIcon, 1.5, 0.3)
+		if actions.events then actions.events() end
+	end
+	game:GetService("RunService").RenderStepped:Connect(function()
+		if not root.Visible then return end
+		local t = os.clock()
+		if self.eventOn or t < waveUntil then
+			evIcon.Rotation = math.sin(t * 9) * 12
+		elseif evIcon.Rotation ~= 0 then
+			evIcon.Rotation *= 0.8
+			if math.abs(evIcon.Rotation) < 0.3 then evIcon.Rotation = 0 end
+		end
+	end)
+	-- what the tab says: the event that's on and how long it has left, or how long until the next
+	task.spawn(function()
+		while root.Parent do
+			local now = workspace:GetServerTimeNow()
+			local e = Game.eventAt(math.floor(now))
+			local function mmss(s: number): string
+				s = math.max(0, math.floor(s))
+				return ("%d:%02d"):format(s // 60, s % 60)
+			end
+			local on = e.on ~= nil
+			if on then
+				events.setText(("%s  %s"):format(e.on.name, mmss(e.ends - now)))
+			else
+				events.setText(("Events  %s"):format(mmss(e.nextAt - now)))
+			end
+			if on ~= self.eventOn then
+				self.eventOn = on
+				events.setColor(on and e.on.color or C.grey)
+				if on then Kit.pop(evHolder, 0.85, 0.3) end
+			end
+			task.wait(0.5)
+		end
+	end)
 	self.eventDot = UI.mk("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(1, -10, 0.5, 0), Size = UDim2.fromOffset(14, 14), BackgroundColor3 = C.red,
 		Visible = false, ZIndex = 9, Parent = events.root,
@@ -185,6 +242,21 @@ function Hub2:setProfile(p)
 	end
 	self.keyText.Text = tostring(v.keys)
 	if prevKeys and v.keys > prevKeys then Kit.pop(self.keyBox, 0.6, 0.3) end
+	-- the Crates tile shows the crate of the furthest zone you've unlocked
+	do
+		local best = "backroad"
+		for _, z in ipairs(Game.Zones) do
+			if v.zones and v.zones[z.id] then best = z.id end
+		end
+		local holder = self.dock.CRATES and self.dock.CRATES.root:FindFirstChild("Holder")
+		local icon = holder and holder:FindFirstChild("Icon") :: ImageLabel?
+		local img = (Kit.Icon :: any)["crate_" .. best] or Kit.Icon.crate
+		if icon and icon.Image ~= img then
+			icon.Image = img
+			if self.crateZone then Kit.pop(icon, 0.6, 0.3) end
+		end
+		self.crateZone = best
+	end
 	-- the Plot's badge: some upgrade (or the overhaul) is within reach of your cash
 	local can = Game.canUpgradePlot(v, p.credits)
 	if not can then

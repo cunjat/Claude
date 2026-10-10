@@ -77,9 +77,10 @@ function HubExtras.new(gui: ScreenGui, remotes: Instance, hooks: { [string]: any
 	join.onClick = function() self:joinHeat() end
 	self.joinBtn = join
 	-- close: hides it until the next Heat
-	local x = Kit.close(30)
+	-- (tucked in on the corner, not hanging off it)
+	local x = Kit.close(28)
 	x.root.AnchorPoint = Vector2.new(0.5, 0.5)
-	x.root.Position = UDim2.new(1, 0, 0, 2)
+	x.root.Position = UDim2.new(1, -8, 0, 8)
 	x.root.ZIndex = 8
 	x.root.Parent = root
 	x.onClick = function()
