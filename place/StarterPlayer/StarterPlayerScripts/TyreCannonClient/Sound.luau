@@ -1,0 +1,113 @@
+--!strict
+-- TYRE CANNON :: Sound
+-- The run's sounds by name, in one place. Every id is licensed audio from the Creator Store
+-- (APM Music and Pro Sound Effects), so it plays in any experience. Change an id here and
+-- it changes everywhere.
+--   Sound.play(name, opts)      one-shot (opts: volume, pitch, length to fade out after)
+--   Sound.bed(name)             start a looping music bed that stings duck under
+--   Sound.duck(seconds)         pull the bed down while something important plays
+
+local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local ContentProvider = game:GetService("ContentProvider")
+local Debris = game:GetService("Debris")
+
+local Sound = {}
+
+Sound.Bank = {
+	-- Pro Sound Effects
+	gateWhoosh = { id = "rbxassetid://9114346802", volume = 0.6, group = "Effects" },	-- enhanced vehicle pass by, fast whoosh
+	land = { id = "rbxassetid://9114036511", volume = 0.5, group = "Effects" },			-- deep impacts, low end
+	cheer = { id = "rbxassetid://9120973900", volume = 0.4, group = "Effects" },			-- crowd, short punchy cheers
+}
+
+local bed: Sound? = nil
+local bedVolume = 1
+local duckUntil = 0
+local duckLevel = 1
+local bedSpeed = 1
+
+local function make(def, volume: number): Sound
+	local s = Instance.new("Sound")
+	s.SoundId = def.id
+	s.Volume = volume
+	s.Looped = def.looped == true
+	s.SoundGroup = SoundService:FindFirstChild(def.group) :: SoundGroup?
+	s.Parent = SoundService
+	return s
+end
+
+function Sound.play(name: string, opts: { [string]: any }?): Sound?
+	local def = Sound.Bank[name]
+	if not def then return nil end
+	local o = opts or {}
+	local s = make(def, def.volume * (o.volume or 1))
+	s.PlaybackSpeed = o.pitch or 1
+	s:Play()
+	local length = o.length
+	if length then
+		task.delay(length, function()
+			if s.Parent then TweenService:Create(s, TweenInfo.new(0.6), { Volume = 0 }):Play() end
+		end)
+		Debris:AddItem(s, length + 0.7)
+	else
+		Debris:AddItem(s, 30)
+	end
+	return s
+end
+
+-- a looping bed that fades in; stop it with Sound.stopBed
+function Sound.bed(name: string)
+	Sound.stopBed(0.2)
+	local def = Sound.Bank[name]
+	if not def then return end
+	local s = make(def, 0)
+	s:Play()
+	bed = s
+	bedVolume = 0
+	TweenService:Create(s, TweenInfo.new(1.4), { Volume = def.volume }):Play()
+	task.delay(1.45, function()
+		if bed == s then bedVolume = def.volume end
+	end)
+end
+
+function Sound.stopBed(fade: number?)
+	local s = bed
+	bed = nil
+	if not s then return end
+	local t = TweenService:Create(s, TweenInfo.new(fade or 0.8), { Volume = 0 })
+	t:Play()
+	t.Completed:Once(function() s:Destroy() end)
+end
+
+-- how fast the bed plays: slow motion drags the music down with it
+function Sound.setBedSpeed(speed: number)
+	bedSpeed = speed
+end
+
+function Sound.duck(seconds: number)
+	duckUntil = math.max(duckUntil, os.clock() + seconds)
+end
+
+RunService.Heartbeat:Connect(function(dt)
+	local s = bed
+	if not s or bedVolume <= 0 then return end
+	local goal = os.clock() < duckUntil and 0.35 or 1
+	duckLevel += (goal - duckLevel) * (1 - math.exp(-dt * 6))
+	s.Volume = bedVolume * duckLevel
+	s.PlaybackSpeed += (bedSpeed - s.PlaybackSpeed) * (1 - math.exp(-dt * 5))
+end)
+
+-- everything loads before it's needed
+task.spawn(function()
+	local list = {}
+	for _, def in pairs(Sound.Bank) do
+		local s = Instance.new("Sound")
+		s.SoundId = def.id
+		table.insert(list, s)
+	end
+	pcall(function() ContentProvider:PreloadAsync(list) end)
+end)
+
+return Sound
