@@ -536,7 +536,7 @@ end
 function HudUI:gateBanner(_tier: number, metres: number?, _split: number?, _bestSplit: number?, zoneName: string?)
 	local holder = UI.mk("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(-0.6, 0.62), Size = UDim2.fromOffset(560, 80),
-		BackgroundTransparency = 1, Rotation = -3, ZIndex = 30, Parent = self.root,
+		BackgroundTransparency = 1, Rotation = 0, ZIndex = 30, Parent = self.root,
 	})
 	UI.autoScale(holder)
 	Kit.slice("banner", C.accent, holder, 30, 0.5)

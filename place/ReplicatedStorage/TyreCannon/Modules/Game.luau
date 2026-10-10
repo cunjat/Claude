@@ -116,25 +116,37 @@ Game.V3 = {
 	RegenPer = 0.22,         -- per cooling level
 	GlidePer = 0.045,        -- less sink, wider glide per compressor level
 	StageSpeed = { 1.0, 1.1, 1.2, 1.3, 1.4 },  -- each yard stage scales the whole run (gently: cash is the stage's reward)
+	-- what a machine level is worth at each stage: a level at a later stage adds more (Cannon +9% a
+	-- level on a dirt lot, +20% on a launch complex), so every stage's upgrades are felt
+	StageUpgrade = { 1.0, 1.3, 1.6, 1.9, 2.2 },
 }
 
--- what a machine does at a level, in words people read ("Launch speed +27%", "Nitro tank 154")
-function Game.machineEffect(id: string, level: number): string
+-- the per-level multiplier for machines at a yard stage
+function Game.upgradeMul(tier: number?): number
+	local u = Game.V3.StageUpgrade
+	return u[math.clamp(math.floor(tier or 1), 1, #u)]
+end
+
+-- what a machine does at a level, in words people read ("Launch speed +27%", "Nitro tank 154");
+-- `tier` is the yard's stage (a level is worth more at a later stage)
+function Game.machineEffect(id: string, level: number, tier: number?): string
 	local V = Game.V3
-	if id == "cannon" then return ("Launch speed +%d%%"):format(math.floor(V.CannonPer * level * 100 + 0.5)) end
-	if id == "fuel" then return ("Nitro tank %d"):format(math.floor(V.NitroBase * (1 + V.NitroPer * level) + 0.5)) end
-	if id == "cooling" then return ("Nitro recharge %.1f/s"):format(V.RegenBase * (1 + V.RegenPer * level)) end
+	local u = Game.upgradeMul(tier)
+	if id == "cannon" then return ("Launch speed +%d%%"):format(math.floor(V.CannonPer * u * level * 100 + 0.5)) end
+	if id == "fuel" then return ("Nitro tank %d"):format(math.floor(V.NitroBase * (1 + V.NitroPer * u * level) + 0.5)) end
+	if id == "cooling" then return ("Nitro recharge %.1f/s"):format(V.RegenBase * (1 + V.RegenPer * u * level)) end
 	if id == "compressor" then return ("Glide +%d%%"):format(math.floor(V.GlidePer * level * 100 + 0.5)) end
 	if id == "rack" then return ("%d spare tyre slot%s"):format(1 + level, level == 0 and "" or "s") end
 	return ""
 end
 
 -- what the next level adds, short, for the goal card and the Plot rows
-function Game.machineNext(id: string, _level: number): string
+function Game.machineNext(id: string, _level: number, tier: number?): string
 	local V = Game.V3
-	if id == "cannon" then return ("+%d%% launch speed"):format(math.floor(V.CannonPer * 100 + 0.5)) end
-	if id == "fuel" then return ("+%d nitro"):format(math.floor(V.NitroBase * V.NitroPer + 0.5)) end
-	if id == "cooling" then return ("+%.1f nitro/s"):format(V.RegenBase * V.RegenPer) end
+	local u = Game.upgradeMul(tier)
+	if id == "cannon" then return ("+%d%% launch speed"):format(math.floor(V.CannonPer * u * 100 + 0.5)) end
+	if id == "fuel" then return ("+%d nitro"):format(math.floor(V.NitroBase * V.NitroPer * u + 0.5)) end
+	if id == "cooling" then return ("+%.1f nitro/s"):format(V.RegenBase * V.RegenPer * u) end
 	if id == "compressor" then return ("+%.1f%% glide"):format(V.GlidePer * 100) end
 	if id == "rack" then return "+1 spare tyre slot" end
 	return ""
@@ -161,8 +173,11 @@ end
 -- the metres a plot can reach on an average run (before skill and luck)
 function Game.reachMetres(levels: { [string]: number }, tier: number): number
 	local d = Game.Run.BaseMetres * Game.Tiers[math.clamp(tier, 1, #Game.Tiers)].reach
+	local u = Game.upgradeMul(tier)
 	for _, m in ipairs(Game.Machines) do
-		if m.gain > 0 then d *= 1 + m.gain * (levels[m.id] or 0) end
+		-- (the compressor's glide doesn't scale with the stage)
+		local k = if m.id == "compressor" then 1 else u
+		if m.gain > 0 then d *= 1 + m.gain * k * (levels[m.id] or 0) end
 	end
 	return d
 end
@@ -229,8 +244,16 @@ for i, r in ipairs(Game.Rarities) do
 	(r :: any).order = i
 	Game.RaritiesById[r.id] = r
 end
--- fusing five of the same tyre makes the next star: each star adds half the rarity's multiplier again
-Game.Forge = { Need = 5, Names = { "", "Gold", "Chrome", "Obsidian" }, StarShare = 0.5 }
+-- fusing copies of the same tyre makes the next star: each star adds half the rarity's multiplier
+-- again. How many copies a fuse takes goes down as the tyre gets rarer (Game.fuseNeed).
+Game.Forge = { Need = 5, Names = { "", "Gold", "Chrome", "Obsidian" }, StarShare = 0.5,
+	NeedBy = { Common = 6, Uncommon = 6, Rare = 5, Epic = 5, Legendary = 4, Mythic = 3, Secret = 2 } }
+
+-- how many of a tyre one fuse takes
+function Game.fuseNeed(id: string): number
+	local t = Game.TyresById and Game.TyresById[id]
+	return (t and Game.Forge.NeedBy[t.rarity]) or Game.Forge.Need
+end
 
 --==============================================================
 -- v3: a tyre is a cash multiplier (like a pet in a simulator). Its rarity sets it, stars add to
@@ -443,14 +466,15 @@ function Game.runStats(levels: { [string]: number }, tier: number, launch: { id:
 	local V = Game.V3
 	local cannon, fuel, cooling, comp = levels.cannon or 0, levels.fuel or 0, levels.cooling or 0, levels.compressor or 0
 	local k = V.StageSpeed[math.clamp(tier, 1, #V.StageSpeed)]
+	local u = Game.upgradeMul(tier)
 	local e = Game.tyreEffects(launch, spares)
 	local def = launch and Game.TyresById[launch.id]
 	local st = {
 		stage = k,
-		launchSpeed = V.LaunchBase * k * (1 + V.CannonPer * cannon) * (1 + e.launch),
+		launchSpeed = V.LaunchBase * k * (1 + V.CannonPer * u * cannon) * (1 + e.launch),
 		launchAngle = 20,
-		nitroMax = V.NitroBase * (1 + V.NitroPer * fuel) * (1 + e.fuel),
-		nitroRegen = V.RegenBase * (1 + V.RegenPer * cooling) * (1 + e.cooling),
+		nitroMax = V.NitroBase * (1 + V.NitroPer * u * fuel) * (1 + e.fuel),
+		nitroRegen = V.RegenBase * (1 + V.RegenPer * u * cooling) * (1 + e.cooling),
 		nitroPower = 1 + e.boost,
 		glide = (1 + V.GlidePer * comp) * (1 + e.air),
 		turn = 1 + e.grip,
@@ -715,6 +739,17 @@ Game.Yard = {
 		{ -18, 12, -14, 16 },
 	},
 }
+-- the yard grows with its stage: wider each side and longer down the lane (the street edge, x0,
+-- stays where it is). Stage 1 is the floor above; the plots have room round them for stage 5.
+Game.YardGrowth = {
+	{ z = 38, x1 = 73 }, { z = 44, x1 = 80 }, { z = 50, x1 = 88 }, { z = 55, x1 = 96 }, { z = 60, x1 = 104 },
+}
+-- the floor a yard at `tier` has (nil: the biggest, for reading anyone's layout)
+function Game.yardFloor(tier: number?): { x0: number, z0: number, x1: number, z1: number }
+	local g = Game.YardGrowth[math.clamp(math.floor(tier or #Game.YardGrowth), 1, #Game.YardGrowth)]
+	return { x0 = Game.Yard.Floor.x0, z0 = -g.z, x1 = g.x1, z1 = g.z }
+end
+
 Game.YardUnits = {}
 Game.YardUnitOf = {}	-- machine id -> its unit
 for _, u in ipairs(Game.Yard.Units) do
@@ -752,9 +787,9 @@ Game.YardDecor = {
 Game.YardDecorById = {}
 for _, d in ipairs(Game.YardDecor) do Game.YardDecorById[d.id] = d end
 
--- how many decor pieces a yard at `tier` can hold
+-- how many decor pieces a yard at `tier` can hold (a bigger yard holds more: 14, 20, 26, 32, 38)
 function Game.yardDecorMax(tier: number?): number
-	return 6 + 4 * math.clamp(math.floor(tier or 1), 1, 5)
+	return 8 + 6 * math.clamp(math.floor(tier or 1), 1, 5)
 end
 
 export type YardSpot = { x: number, z: number, r: number }
@@ -794,14 +829,15 @@ end
 function Game.yardLayout(raw: any, tier: number?): YardLayout
 	local out = {}
 	local Y = Game.Yard
+	local F = Game.yardFloor(tier)
 	for _, u in ipairs(Y.Units) do
 		local e = type(raw) == "table" and raw[u.id] or nil
 		local x, z, r = u.x, u.z, u.r
 		if type(e) == "table" then
 			local ex, ez, er = tonumber(e.x), tonumber(e.z), tonumber(e.r)
 			if ex and ez and er and ex == ex and ez == ez then
-				x = math.clamp(math.floor(ex / Y.Grid + 0.5) * Y.Grid, Y.Floor.x0, Y.Floor.x1)
-				z = math.clamp(math.floor(ez / Y.Grid + 0.5) * Y.Grid, Y.Floor.z0, Y.Floor.z1)
+				x = math.clamp(math.floor(ex / Y.Grid + 0.5) * Y.Grid, F.x0, F.x1)
+				z = math.clamp(math.floor(ez / Y.Grid + 0.5) * Y.Grid, F.z0, F.z1)
 				r = math.floor(er) % 4
 			end
 		end
@@ -818,8 +854,8 @@ function Game.yardLayout(raw: any, tier: number?): YardLayout
 			if kind and ex and ez and er and ex == ex and ez == ez and (tier == nil or kind.tier <= tier) then
 				table.insert(decor, {
 					k = kind.id,
-					x = math.clamp(math.floor(ex / Y.Grid + 0.5) * Y.Grid, Y.Floor.x0, Y.Floor.x1),
-					z = math.clamp(math.floor(ez / Y.Grid + 0.5) * Y.Grid, Y.Floor.z0, Y.Floor.z1),
+					x = math.clamp(math.floor(ex / Y.Grid + 0.5) * Y.Grid, F.x0, F.x1),
+					z = math.clamp(math.floor(ez / Y.Grid + 0.5) * Y.Grid, F.z0, F.z1),
 					r = math.floor(er) % 4,
 				})
 			end
@@ -833,10 +869,11 @@ local function overlap(a: { number }, b: { number }, gap: number): boolean
 	return a[1] < b[3] + gap and b[1] < a[3] + gap and a[2] < b[4] + gap and b[2] < a[4] + gap
 end
 
--- is the layout allowed? returns ok and the set of units that are in the wrong place
-function Game.yardCheck(layout: YardLayout): (boolean, { [string]: boolean })
+-- is the layout allowed on a yard at `tier` (nil: the biggest floor)? returns ok and the set of
+-- units that are in the wrong place
+function Game.yardCheck(layout: YardLayout, tier: number?): (boolean, { [string]: boolean })
 	local Y = Game.Yard
-	local F = Y.Floor
+	local F = Game.yardFloor(tier)
 	local bad = {}
 	local boxes = {}
 	for _, u in ipairs(Y.Units) do

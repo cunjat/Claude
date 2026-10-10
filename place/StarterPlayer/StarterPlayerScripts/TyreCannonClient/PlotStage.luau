@@ -23,8 +23,13 @@ local Sound = require(script.Parent.Sound)
 local PlotStage = {}
 PlotStage.__index = PlotStage
 
--- the plot's own frame: the floor runs x -34..74, z -39..39, its top 2 up; -x faces the street
-local FLOOR = { x0 = -34, x1 = 74, z0 = -39, z1 = 39, y = 2 }
+-- the plot's own frame: the floor runs x -34..74, z -39..39 on a dirt lot (it grows with the
+-- stage, Game.yardFloor: the fence stands a stud outside the floor you can build on), its top 2
+-- up; -x faces the street
+local function floorFor(tier: number)
+	local g = Game.yardFloor(math.max(1, tier))
+	return { x0 = g.x0 - 1, x1 = g.x1 + 1, z0 = g.z0 - 1, z1 = g.z1 + 1, y = 2 }
+end
 local PANEL = 16
 -- a building's frame: centred on z -14, its front on the street, its back against the floor edge
 local BUILD_Z = -14
@@ -316,19 +321,32 @@ function PlotStage:build(plot: Instance)
 	local f = Instance.new("Folder")
 	f.Name = "Stage"
 	f.Parent = plot
+	local FLOOR = floorFor(tier)
 
-	-- the ground: the floor takes the tier's surface (client-side only)
+	-- the ground: the floor takes the tier's surface and size (client-side only; everyone's client
+	-- builds every yard the same way)
 	local floor = plot:FindFirstChild("Floor") :: BasePart?
 	local g = GROUND[tier] or GROUND[0]
 	if floor then
 		floor.Material = g.mat
 		floor.MaterialVariant = g.variant or ""
 		floor.Color = g.color
+		floor.Size = Vector3.new(FLOOR.x1 - FLOOR.x0, 2, FLOOR.z1 - FLOOR.z0)
+		floor.CFrame = base * CFrame.new((FLOOR.x0 + FLOOR.x1) / 2, 1, (FLOOR.z0 + FLOOR.z1) / 2)
+	end
+	local trim = plot:FindFirstChild("FloorTrim") :: BasePart?
+	if trim then
+		trim.Size = Vector3.new(FLOOR.x1 - FLOOR.x0 + 4, 1.4, FLOOR.z1 - FLOOR.z0 + 4)
+		trim.CFrame = base * CFrame.new((FLOOR.x0 + FLOOR.x1) / 2, 0.5, (FLOOR.z0 + FLOOR.z1) / 2)
 	end
 	local oldFence = plot:FindFirstChild("Fence")
 	if oldFence then
 		for _, d in ipairs(oldFence:GetDescendants()) do
-			if d:IsA("BasePart") then d.LocalTransparencyModifier = 1 end
+			if d:IsA("BasePart") then
+				d.LocalTransparencyModifier = 1
+				-- (and out of the way: a grown yard reaches past where it stood)
+				d.CanCollide = false
+			end
 		end
 	end
 
@@ -381,6 +399,9 @@ function PlotStage:build(plot: Instance)
 		if m then
 			local s = b.sign
 			signBoard(f, bcf * CFrame.new(s.at), s.size, string.upper(owner or "Yard"), Game.Tiers[tier].name)
+			-- and on the wall that faces into the yard, where you stand: the same board turned round
+			signBoard(f, bcf * CFrame.new(-s.at.X, s.at.Y, -b.depth / 2 - 0.15) * CFrame.Angles(0, math.pi, 0), s.size,
+				string.upper(owner or "Yard"), Game.Tiers[tier].name)
 		end
 		local frontZ = b.depth / 2
 		for _, pr in ipairs(FRONT_PROPS) do

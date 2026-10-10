@@ -37,7 +37,9 @@ ZoneMap.LOOK = LOOK
 
 local LOCK = Kit.Icon.lock -- the padlock (icon studio)
 local W = 960
-local ROAD_Y = 188          -- the road's centre line, in the card's own space
+local ROAD_Y = 204          -- the road's centre line, in the card's own space
+local STOP_Y = 72           -- where each stop's box starts (room above it for the STARTING tag)
+local EMBLEM, EMBLEM_ON = 78, 90  -- the emblem's size, and when its stop is picked (inside the card)
 
 function ZoneMap.new(gui: ScreenGui, onPick: (string) -> ())
 	local self = setmetatable({}, ZoneMap)
@@ -84,7 +86,7 @@ function ZoneMap.new(gui: ScreenGui, onPick: (string) -> ())
 		local look = LOOK[z.id]
 		local cx = 40 + (W - 80) * ((i - 0.5) / n)
 		local b = UI.mk("TextButton", {
-			Name = z.id, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromOffset(cx, 56), Size = UDim2.fromOffset(250, 220),
+			Name = z.id, AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.fromOffset(cx, STOP_Y), Size = UDim2.fromOffset(250, 250),
 			BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 8, Parent = face,
 		})
 		local inner = UI.mk("Frame", { Name = "Inner", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 8, Parent = b })
@@ -97,13 +99,14 @@ function ZoneMap.new(gui: ScreenGui, onPick: (string) -> ())
 			Name = "Scene", Position = UDim2.fromOffset(8, 8), Size = UDim2.new(1, -16, 1, -16), BackgroundTransparency = 1,
 			Image = look.pic or "", ScaleType = Enum.ScaleType.Crop, ImageTransparency = 0.45, ZIndex = 9, Parent = card,
 		}, { UI.corner(10) })
+		-- the emblem sits in the middle of its card, clear of every edge
 		local emblem = UI.mk("ImageLabel", {
-			Name = "Emblem", AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromOffset(125, 138), Size = UDim2.fromOffset(120, 120),
+			Name = "Emblem", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(125, 54), Size = UDim2.fromOffset(EMBLEM, EMBLEM),
 			BackgroundTransparency = 1, Image = look.emblem, ScaleType = Enum.ScaleType.Fit, ZIndex = 10, Parent = inner,
 		})
 		-- the node on the road
 		local node = UI.mk("Frame", {
-			Name = "Node", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(125, ROAD_Y - 56), Size = UDim2.fromOffset(34, 34),
+			Name = "Node", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(125, ROAD_Y - STOP_Y), Size = UDim2.fromOffset(34, 34),
 			BackgroundColor3 = look.color, ZIndex = 11, Parent = inner,
 		}, { UI.corner(17) })
 		UI.mk("UIStroke", { Color = Kit.C.ink, Thickness = 3, Parent = node })
@@ -113,22 +116,23 @@ function ZoneMap.new(gui: ScreenGui, onPick: (string) -> ())
 		num.Parent = node
 		local name = Kit.text(string.upper(z.name), 26, C.white, 3)
 		name.AnchorPoint = Vector2.new(0.5, 0)
-		name.Position = UDim2.fromOffset(125, ROAD_Y - 56 + 70)
+		name.Position = UDim2.fromOffset(125, ROAD_Y - STOP_Y + 26)
 		name.Size = UDim2.fromOffset(240, 30)
 		Kit.fit(name, 26, 14)
 		name.ZIndex = 10
 		name.Parent = inner
 		local status = Kit.text("", 15, C.gold, 2, Kit.Body)
 		status.AnchorPoint = Vector2.new(0.5, 0)
-		status.Position = UDim2.fromOffset(125, ROAD_Y - 56 + 102)
+		status.Position = UDim2.fromOffset(125, ROAD_Y - STOP_Y + 58)
 		status.Size = UDim2.fromOffset(240, 20)
 		status.ZIndex = 10
 		status.Parent = inner
 		local lock = UI.mk("ImageLabel", {
-			Name = "Lock", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(125, 70), Size = UDim2.fromOffset(64, 64),
+			Name = "Lock", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(125, 54), Size = UDim2.fromOffset(56, 56),
 			BackgroundTransparency = 1, Image = LOCK, ZIndex = 13, Visible = false, Parent = inner,
 		})
-		local chip = Kit.plate(inner, "Starting", C.green, UDim2.fromOffset(75, 4), UDim2.fromOffset(100, 24), 13)
+		-- STARTING sits above the card, not on it
+		local chip = Kit.plate(inner, "Starting", C.green, UDim2.fromOffset(70, -30), UDim2.fromOffset(110, 26), 13)
 		chip.Visible = false
 		b.MouseEnter:Connect(function()
 			if self.focus ~= z.id then Kit.tween(inner, 0.14, { Position = UDim2.fromOffset(0, -6) }, Enum.EasingStyle.Back) end
@@ -145,7 +149,7 @@ function ZoneMap.new(gui: ScreenGui, onPick: (string) -> ())
 	end
 
 	-- the zone you've picked, under the road
-	local card = UI.mk("Frame", { Position = UDim2.fromOffset(34, 322), Size = UDim2.fromOffset(W - 68, 196), BackgroundTransparency = 1, ZIndex = 5, Parent = face })
+	local card = UI.mk("Frame", { Position = UDim2.fromOffset(34, 336), Size = UDim2.fromOffset(W - 68, 186), BackgroundTransparency = 1, ZIndex = 5, Parent = face })
 	Kit.slice("panel_body", nil, card, 5, 0.4)
 	self.cardEdge = Kit.slice("panel_ring", C.teal, card, 6, 0.4)
 	self.title = Kit.text("", 30, C.white, 3)
@@ -199,7 +203,7 @@ function ZoneMap:show(id: string)
 	for zid, s in pairs(self.stops) do
 		local on = zid == id
 		Kit.tween(s.inner, 0.16, { Position = UDim2.fromOffset(0, on and -10 or 0) }, Enum.EasingStyle.Back)
-		Kit.tween(s.emblem, 0.16, { Size = if on then UDim2.fromOffset(140, 140) else UDim2.fromOffset(112, 112) }, Enum.EasingStyle.Back)
+		Kit.tween(s.emblem, 0.16, { Size = if on then UDim2.fromOffset(EMBLEM_ON, EMBLEM_ON) else UDim2.fromOffset(EMBLEM, EMBLEM) }, Enum.EasingStyle.Back)
 		Kit.tween(s.glow, 0.16, { ImageTransparency = if on then 0 else 0.5 })
 	end
 	self.title.Text = string.upper(z.name)
@@ -268,7 +272,7 @@ function ZoneMap:animate()
 		self.roller.Position = UDim2.fromOffset(x, ROAD_Y + math.abs(math.sin(t * 9)) * -2)
 		self.roller.Rotation += dt * (math.abs(target - x) > 2 and 540 or 60)
 		local s = self.stops[self.focus]
-		if s then s.emblem.Position = UDim2.fromOffset(125, 138 + math.sin(t * 3) * 3) end
+		if s then s.emblem.Position = UDim2.fromOffset(125, 54 + math.sin(t * 3) * 2) end
 	end)
 end
 

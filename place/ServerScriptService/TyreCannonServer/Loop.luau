@@ -559,6 +559,7 @@ function Loop.init(S)
 		local p, v = data(player)
 		forge = math.floor(tonumber(forge) or 0)
 		if not p or type(id) ~= "string" or not Game.TyresById[id] or forge < 0 or forge > 2 then return { ok = false } end
+		local need = Game.fuseNeed(id)
 		local pick = {}
 		for _, t in ipairs(v.inv) do
 			if t.id == id and t.forge == forge and t.uid ~= v.launch and not table.find(v.spares, t.uid) and not t.fav then
@@ -566,14 +567,14 @@ function Loop.init(S)
 			end
 		end
 		-- the equipped ones count too if there aren't enough spare copies (a favourite never does)
-		if #pick < Game.Forge.Need then
+		if #pick < need then
 			for _, t in ipairs(v.inv) do
 				if t.id == id and t.forge == forge and not table.find(pick, t.uid) and not t.fav then table.insert(pick, t.uid) end
 			end
 		end
-		if #pick < Game.Forge.Need then return { ok = false, err = ("You need %d of these (favourites are kept)."):format(Game.Forge.Need) } end
+		if #pick < need then return { ok = false, err = ("You need %d of these (favourites are kept)."):format(need) } end
 		local gone = {}
-		for i = 1, Game.Forge.Need do gone[pick[i]] = true end
+		for i = 1, need do gone[pick[i]] = true end
 		local keep = {}
 		for _, t in ipairs(v.inv) do
 			if not gone[t.uid] then table.insert(keep, t) end
@@ -603,7 +604,7 @@ function Loop.init(S)
 		local p, v = data(player)
 		if not p or type(raw) ~= "table" then return { ok = false } end
 		local layout = Game.yardLayout(raw, v and v.tier or 1)
-		local ok, bad = Game.yardCheck(layout)
+		local ok, bad = Game.yardCheck(layout, v and v.tier or 1)
 		if not ok then
 			local ids = {}
 			for id in pairs(bad) do table.insert(ids, id) end

@@ -700,7 +700,7 @@ local function makeBay(stage: Frame, x: UDim2, got, pace: { k: number })
 		under(("x%s CASH"):format(Game.multText(Game.tyreMult(tyre.id, 0, got.mut))), 18, C.gold, 64, Kit.Body)
 		if mut then
 			local badge = Kit.plate(stage, mut.name .. "  x" .. Game.multText(mut.mult), mut.color, x + UDim2.fromOffset(40, -150), UDim2.fromOffset(130, 32), 68)
-			badge.Rotation = 7
+			badge.Rotation = 0
 			Kit.pop(badge, 1.8, 0.22)
 		end
 	end

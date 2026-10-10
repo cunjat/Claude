@@ -190,6 +190,11 @@ function YardEdit:tier(): number
 	return (self.plotModel and self.plotModel:GetAttribute("V2_Tier") :: number?) or 1
 end
 
+-- the floor this yard has at its stage
+function YardEdit:floor()
+	return Game.yardFloor(self:tier())
+end
+
 -- the drawn state and the footprint plate of every piece of decor, rebuilt after one's added or removed
 function YardEdit:syncDecor()
 	for id in pairs(self.shown) do
@@ -312,7 +317,7 @@ function YardEdit:addDecor(kindId: string, card: GuiObject?)
 		return
 	end
 	local G = Game.Yard.Grid
-	local F = Game.Yard.Floor
+	local F = self:floor()
 	local cx = math.floor(self.view.target.X / G + 0.5) * G
 	local cz = math.floor(self.view.target.Z / G + 0.5) * G
 	local entry = { k = kindId, x = cx, z = cz, r = 0 }
@@ -325,7 +330,7 @@ function YardEdit:addDecor(kindId: string, card: GuiObject?)
 				if math.max(math.abs(dx), math.abs(dz)) == ring and not found then
 					entry.x = math.clamp(cx + dx * G * 2, F.x0, F.x1)
 					entry.z = math.clamp(cz + dz * G * 2, F.z0, F.z1)
-					local _, bad = Game.yardCheck(self.layout)
+					local _, bad = Game.yardCheck(self.layout, self:tier())
 					if not bad["d" .. n] then found = true end
 				end
 			end
@@ -390,7 +395,7 @@ function YardEdit:open(plot: Instance, onClose: (() -> ())?)
 	folder.Name = "YardEditor"
 	folder.Parent = workspace
 	self.folder = folder
-	local F = Game.Yard.Floor
+	local F = self:floor()
 	local lineCol = Color3.fromRGB(28, 26, 34)
 	for x = F.x0 + 1, F.x1 - 1, 4 do
 		flat(folder, "Grid", Vector3.new(0.14, 0.04, F.z1 - F.z0), base * CFrame.new(x, FLOOR_Y + 0.03, (F.z0 + F.z1) / 2), lineCol, 0.82)
@@ -587,10 +592,12 @@ end
 --==============================================================
 -- picking up, dragging, setting down
 --==============================================================
--- where a screen point lands on the yard's floor, in plot space
+-- where a screen point lands on the yard's floor, in plot space. Input positions leave out the
+-- top bar, so the ray is cast with ScreenPointToRay (ViewportPointToRay aims a top bar too high,
+-- and a click would land on whatever stands behind the pointer)
 function YardEdit:floorAt(screen: Vector2): Vector3?
 	local cam = workspace.CurrentCamera
-	local ray = cam:ViewportPointToRay(screen.X, screen.Y)
+	local ray = cam:ScreenPointToRay(screen.X, screen.Y)
 	local o = self.base:PointToObjectSpace(ray.Origin)
 	local d = self.base:VectorToObjectSpace(ray.Direction)
 	if math.abs(d.Y) < 1e-4 then return nil end
@@ -626,11 +633,52 @@ function YardEdit:unitAt(p: Vector3): string?
 	return best or near
 end
 
+-- the machine or piece of decor drawn under the pointer: the click ray against each one's own
+-- box (the nearest it meets), so a tall machine is picked where you see it, not by the floor
+-- behind it. Nothing met: whatever's footprint is under the floor point.
+function YardEdit:pickAt(screen: Vector2, p: Vector3?): string?
+	local cam = workspace.CurrentCamera
+	local ray = cam:ScreenPointToRay(screen.X, screen.Y)
+	local best, bestT = nil, math.huge
+	local function test(id: string, m: Instance?)
+		if not (m and m:IsA("Model") and m.Parent) then return end
+		local cf, size = m:GetBoundingBox()
+		local o = cf:PointToObjectSpace(ray.Origin)
+		local d = cf:VectorToObjectSpace(ray.Direction)
+		local h = size / 2
+		local t0, t1 = -math.huge, math.huge
+		for _, ax in ipairs({ "X", "Y", "Z" }) do
+			local oa, da, ha = (o :: any)[ax], (d :: any)[ax], (h :: any)[ax]
+			if math.abs(da) < 1e-6 then
+				if oa < -ha or oa > ha then return end
+			else
+				local a, b = (-ha - oa) / da, (ha - oa) / da
+				if a > b then a, b = b, a end
+				t0, t1 = math.max(t0, a), math.min(t1, b)
+				if t0 > t1 then return end
+			end
+		end
+		local t = if t0 >= 0 then t0 else t1
+		if t >= 0 and t < bestT then best, bestT = id, t end
+	end
+	local y = self.plot2.yards[self.plotModel]
+	if y then
+		for _, u in ipairs(Game.Yard.Units) do
+			for _, m in ipairs(self.plot2:unitModels(self.plotModel, u.id)) do test(u.id, m) end
+		end
+		for i, e in pairs(y.decor or {}) do
+			if e and e.model then test("d" .. i, e.model) end
+		end
+	end
+	if best then return best end
+	return p and self:unitAt(p) or nil
+end
+
 function YardEdit:press(screen: Vector2)
 	if self.closing then return end
 	local p = self:floorAt(screen)
 	if not p then return end
-	local id = self:unitAt(p)
+	local id = self:pickAt(screen, p)
 	if not id then
 		self.selected = nil
 		self:refreshPlates()
@@ -652,14 +700,14 @@ function YardEdit:drag(screen: Vector2)
 	local p = self:floorAt(screen)
 	if not p then return end
 	if not self.held then
-		self.hover = self:unitAt(p)
+		self.hover = self:pickAt(screen, p)
 		self:refreshPlates()
 		return
 	end
 	local G = Game.Yard.Grid
 	local s = self:spot(self.held)
 	local tx, tz = p.X + self.grab.X, p.Z + self.grab.Z
-	local F = Game.Yard.Floor
+	local F = self:floor()
 	s.x = math.clamp(math.floor(tx / G + 0.5) * G, F.x0, F.x1)
 	s.z = math.clamp(math.floor(tz / G + 0.5) * G, F.z0, F.z1)
 	self:refreshPlates()
@@ -669,7 +717,7 @@ function YardEdit:release()
 	local id = self.held
 	if not id then return end
 	self.held = nil
-	local ok, bad = Game.yardCheck(self.layout)
+	local ok, bad = Game.yardCheck(self.layout, self:tier())
 	if not ok and bad[id] then
 		-- it can't stand there: it slides back to where it came from
 		local from = self.pickedFrom
@@ -692,7 +740,7 @@ function YardEdit:turn()
 	while sh.r - s.r > 2 do sh.r -= 4 end
 	while s.r - sh.r > 2 do sh.r += 4 end
 	if not self.held then
-		local ok, bad = Game.yardCheck(self.layout)
+		local ok, bad = Game.yardCheck(self.layout, self:tier())
 		if not ok and bad[id] then
 			s.r = (s.r + 3) % 4
 			Kit.callout(self.gui, "No room to turn", C.red, UDim2.fromScale(0.5, 0.2), 30)
@@ -706,7 +754,7 @@ end
 -- drawing
 --==============================================================
 function YardEdit:refreshPlates()
-	local _, bad = Game.yardCheck(self.layout)
+	local _, bad = Game.yardCheck(self.layout, self:tier())
 	for id, list in pairs(self.plates) do
 		local boxes = self:boxes(id)
 		local col, tr = PLATE_IDLE, 0.72
@@ -727,7 +775,7 @@ function YardEdit:refreshPlates()
 			end
 		end
 	end
-	local ok = Game.yardCheck(self.layout)
+	local ok = Game.yardCheck(self.layout, self:tier())
 	self.doneBtn.setEnabled(ok)
 end
 
@@ -751,7 +799,7 @@ function YardEdit:step(dt: number)
 			local s = self:spot(self.held)
 			v.target = v.target:Lerp(Vector3.new(s.x, 0, s.z), math.min(1, dt * 0.8))
 		end
-		local F = Game.Yard.Floor
+		local F = self:floor()
 		v.target = Vector3.new(math.clamp(v.target.X, F.x0 - 10, F.x1 + 10), 0, math.clamp(v.target.Z, F.z0 - 10, F.z1 + 10))
 		-- the shown view follows on springs: no cuts, no whips
 		local k = 1 - math.exp(-dt * 9)

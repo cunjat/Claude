@@ -893,7 +893,7 @@ function Kit.callout(parent: Instance, text: string, color: Color3, pos: UDim2, 
 	l.Position = pos
 	l.Size = UDim2.fromOffset(600, (size or 46) + 10)
 	l.ZIndex = 50
-	l.Rotation = math.random(-6, 6)
+	l.Rotation = 0 -- straight: callouts read level with everything else
 	l.Parent = parent
 	Kit.pop(l, 0.3, 0.28)
 	task.delay(0.55, function()

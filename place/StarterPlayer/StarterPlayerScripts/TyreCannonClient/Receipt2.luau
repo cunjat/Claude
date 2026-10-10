@@ -131,7 +131,7 @@ function Receipt2.show(gui: ScreenGui, summary, payout, onAgain: () -> (), onUpg
 	if payout.best then
 		-- a red chip that slams onto the card's corner
 		local stamp = UI.mk("Frame", {
-			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(1, -78, 0, 70), Size = UDim2.fromOffset(170, 44), Rotation = 8,
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(1, -78, 0, 70), Size = UDim2.fromOffset(170, 44), Rotation = 0,
 			BackgroundTransparency = 1, ZIndex = 46, Visible = false, Parent = box,
 		})
 		Kit.slice("pill", C.red, stamp, 46, 0.6)

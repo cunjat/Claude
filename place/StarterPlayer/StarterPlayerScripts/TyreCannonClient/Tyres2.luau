@@ -526,8 +526,9 @@ function Tyres2:select(s)
 	local v = self.profile and self.profile.v2
 	self.bSpare.setEnabled(can and not (v and s.uid == v.launch))
 	local count = s.count or 0
-	self.bForge.setText(("Fuse %d/%d"):format(math.min(count, Game.Forge.Need), Game.Forge.Need))
-	self.bForge.setEnabled(can and count >= Game.Forge.Need and (s.forge or 0) < 3)
+	local need = Game.fuseNeed(s.id)
+	self.bForge.setText(("Fuse %d/%d"):format(math.min(count, need), need))
+	self.bForge.setEnabled(can and count >= need and (s.forge or 0) < 3)
 	if v and s.uid then
 		self.bSpare.setText(if table.find(v.spares, s.uid) then "Remove" else "Add Spare")
 	end

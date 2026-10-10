@@ -55,10 +55,10 @@ local COLORS = {
 }
 
 -- what it does now, and (greyed) what the next level adds
-local function effectText(id: string, level: number, _tier: number): string
-	local now = Game.machineEffect(id, level)
+local function effectText(id: string, level: number, tier: number): string
+	local now = Game.machineEffect(id, level, tier)
 	if level >= Game.maxLevel(id) then return now end
-	return ('%s  <font color="#9A948C">next %s</font>'):format(now, Game.machineNext(id, level))
+	return ('%s  <font color="#9A948C">next %s</font>'):format(now, Game.machineNext(id, level, tier))
 end
 
 -- the yard's stages as the Plot screen shows them: a picture of each (art/blender/stage_cards.py)
