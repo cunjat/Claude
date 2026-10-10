@@ -1596,6 +1596,23 @@ function WorldView:buildCountryside(f: Instance, ci: number, land)
 		m.Parent = f
 		return m
 	end
+	-- a line of a long piece (a fence, a guardrail) end to end along the road, with gaps
+	local function row(name: string, z: number, gapChance: number, scale: number)
+		local path = if string.find(name, "/") then "Scenery/" .. name else "Scenery/" .. kind .. "/" .. name
+		local tpl = Models.get(path)
+		if not tpl then return end
+		local probe = Models.copy(tpl)
+		local _, size = probe:GetBoundingBox()
+		probe:Destroy()
+		local long = math.max(size.X, size.Z) * scale
+		local yaw = if size.X >= size.Z then 0 else math.pi / 2
+		local x = x0 + long / 2
+		while x < x0 + CHUNK do
+			if r:NextNumber() > gapChance then put(name, x, z, scale, yaw + (r:NextNumber() < 0.5 and 0 or math.pi), 0.2) end
+			x += long + 0.2
+		end
+	end
+	self:dressZone(kind, put, row, r, x0, half)
 	if kind == "highway" then
 		-- the Grand Trunk is lined with eucalyptus both sides, close in, with gaps
 		for _, side in ipairs({ -1, 1 }) do
@@ -1722,6 +1739,104 @@ function WorldView:buildCountryside(f: Instance, ci: number, land)
 			e.LightInfluence = 1
 			e.LightEmission = 0
 			e.Parent = att
+		end
+	end
+end
+
+-- The zone's own kit, spread thicker so no stretch of road looks empty: every piece each zone was
+-- given is used somewhere, near the road (where the eye is at speed) and out in the land. Anything
+-- solid stands past 215 studs from the centre line (the furthest the tyre can go), so it never
+-- rolls through a lamp or a rail.
+function WorldView:dressZone(kind: string, put: any, row: any, r: Random, x0: number, half: number)
+	local function anyOf(list: { string }): string
+		return list[r:NextInteger(1, #list)]
+	end
+	if kind == "backroad" then
+		for _, side in ipairs({ -1, 1 }) do
+			-- a field fence runs along the verge, broken in places
+			if hash01(side * 13 + 5, math.floor(x0 / 900)) > 0.4 then
+				row("Fence", side * (half + 92), 0.18, r:NextNumber(0.95, 1.1))
+			end
+			-- bushes and a birch or two on the verge
+			for _ = 1, r:NextInteger(3, 5) do
+				put("Bush", x0 + r:NextNumber(0, CHUNK), side * r:NextNumber(half + 50, LAND_NEAR + 30), r:NextNumber(0.8, 1.4))
+			end
+			if r:NextNumber() < 0.5 then
+				put("Birch", x0 + r:NextNumber(0, CHUNK), side * r:NextNumber(half + 100, LAND_NEAR + 60), r:NextNumber(0.85, 1.2))
+			end
+			-- a mailbox at a farm gate
+			if r:NextNumber() < 0.3 then
+				put("Mailbox", x0 + r:NextNumber(20, CHUNK - 20), side * (half + 88), 1.2, side > 0 and math.pi or 0, 0.1)
+			end
+			-- out in the fields: a tractor at work, now and then a farmstead (barn and silo)
+			if r:NextNumber() < 0.28 then
+				put("Tractor", x0 + r:NextNumber(20, CHUNK - 20), side * r:NextNumber(LAND_NEAR + 20, LAND_NEAR + 200), r:NextNumber(1.0, 1.2))
+			end
+			if r:NextNumber() < 0.14 then
+				local x = x0 + r:NextNumber(40, CHUNK - 40)
+				local z = side * r:NextNumber(LAND_NEAR + 120, LAND_NEAR + 420)
+				put("Barn", x, z, r:NextNumber(1.0, 1.2), side > 0 and math.pi or 0, 0.5)
+				put("Silo", x + r:NextNumber(18, 26), z + side * r:NextNumber(4, 12), r:NextNumber(1.0, 1.15), nil, 0.5)
+			end
+		end
+	elseif kind == "highway" then
+		for _, side in ipairs({ -1, 1 }) do
+			-- a guardrail along the hard shoulder, and street lamps over it
+			row("Guardrail", side * (half + 90), 0.08, 1.0)
+			local x = x0 + 30 + (side > 0 and 0 or 45)
+			while x < x0 + CHUNK do
+				put("StreetLamp", x, side * (half + 95), 1.15, side > 0 and 0 or math.pi, 0.2)
+				x += 90
+			end
+			-- jersey barriers stacked at a works spot, now and then
+			if r:NextNumber() < 0.18 then
+				local bx = x0 + r:NextNumber(30, CHUNK - 30)
+				for k = 0, r:NextInteger(1, 3) do
+					put("JerseyBarrier", bx + k * 17, side * (half + 105), 1.0, 0, 0.1)
+				end
+			end
+		end
+		-- a billboard out in the scrub every other chunk, a gantry sign now and then
+		if math.floor(x0 / CHUNK) % 2 == 0 then
+			local side = (math.floor(x0 / CHUNK / 2) % 2 == 0) and -1 or 1
+			put("Billboard", x0 + r:NextNumber(40, CHUNK - 40), side * r:NextNumber(half + 130, half + 220), r:NextNumber(1.2, 1.5), side > 0 and math.pi or 0, 0.3)
+		end
+		if math.floor(x0 / CHUNK) % 3 == 1 then
+			local side = (r:NextNumber() < 0.5) and -1 or 1
+			put("HighwaySign", x0 + r:NextNumber(40, CHUNK - 40), side * (half + 100), 1.3, side > 0 and math.pi or 0, 0.2)
+		end
+		-- the power line on the far side too
+		if math.floor(x0 / CHUNK) % 2 == 1 then put("Pylon", x0 + 40, -760, 1.0, 0, 0.5) end
+	elseif kind == "dunes" then
+		for _, side in ipairs({ -1, 1 }) do
+			-- scrub on the verge: prickly pear, tumbleweed, the odd skull
+			for _ = 1, r:NextInteger(3, 5) do
+				put(anyOf({ "PricklyPear", "PricklyPear", "Tumbleweed" }), x0 + r:NextNumber(0, CHUNK), side * r:NextNumber(half + 70, LAND_NEAR + 60), r:NextNumber(0.9, 1.5))
+			end
+			if r:NextNumber() < 0.3 then
+				put("CowSkull", x0 + r:NextNumber(0, CHUNK), side * r:NextNumber(half + 60, half + 110), r:NextNumber(1.0, 1.4), nil, 0.2)
+			end
+			-- khejri closer in than the lone ones out on the sand
+			for _ = 1, r:NextInteger(1, 2) do
+				put("Khejri", x0 + r:NextNumber(0, CHUNK), side * r:NextNumber(half + 100, half + 220), r:NextNumber(0.85, 1.2))
+			end
+			-- a wreck half sunk by the road
+			if r:NextNumber() < 0.12 then
+				put("Wreck", x0 + r:NextNumber(20, CHUNK - 20), side * r:NextNumber(half + 100, half + 180), r:NextNumber(1.0, 1.2), nil, 0.6)
+			end
+			-- a cactus or two (the odd saguaro among them)
+			if r:NextNumber() < 0.35 then
+				put(anyOf({ "Saguaro", "PricklyPear" }), x0 + r:NextNumber(0, CHUNK), side * r:NextNumber(half + 100, LAND_NEAR + 160), r:NextNumber(1.0, 1.4))
+			end
+		end
+		-- an oasis: a cluster of palms round a hollow, every few chunks
+		if math.floor(x0 / CHUNK) % 5 == 3 then
+			local side = (math.floor(x0 / CHUNK / 5) % 2 == 0) and 1 or -1
+			local cx = x0 + r:NextNumber(60, CHUNK - 60)
+			local cz = side * r:NextNumber(half + 120, half + 320)
+			for _ = 1, r:NextInteger(4, 7) do
+				put("Palm", cx + r:NextNumber(-30, 30), cz + r:NextNumber(-24, 24), r:NextNumber(0.9, 1.3))
+			end
 		end
 	end
 end
