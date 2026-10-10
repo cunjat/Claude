@@ -81,6 +81,7 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 	local yaw = THUMB_YAW
 	local turning = true
 	local editing = false
+	local camTween: Tween? = nil
 	local held = 0      -- a drag turned it by hand: the slow turn waits this long to pick up again
 	local conn = RunService.RenderStepped:Connect(function(dt)
 		held = math.max(0, held - dt)
@@ -126,12 +127,15 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 		end
 		local size = root.AbsoluteSize
 		local CAM_EDIT = camEdit(aspect or (if size.Y > 0 then size.X / size.Y else 1))
+		-- (one glide at a time: a quick on-then-off cancels the first)
+		if camTween then camTween:Cancel() end
 		local cv = Instance.new("CFrameValue")
 		cv.Value = cam.CFrame
 		cv.Changed:Connect(function(v) cam.CFrame = v end)
 		local tw = game:GetService("TweenService"):Create(cv, TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
 			{ Value = if on then CAM_EDIT else CAM_SHOW })
 		tw.Completed:Connect(function() cv:Destroy() end)
+		camTween = tw
 		tw:Play()
 	end
 	function api.isEditing(): boolean return editing end
