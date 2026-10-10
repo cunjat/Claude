@@ -491,6 +491,23 @@ function Track:objectsForChunk(ci: number)
 				if x > OPENING_END then pad(ci .. ":d1", x) end
 			end
 		end
+		-- the skill zones' furniture (their own generator, so the rest of the road is the same with or
+		-- without them)
+		for _, zone in ipairs(self:skillZones(x0, x1)) do
+			local zr = Random.new((self.runSeed % 65536) * 104729 + zone.i * 7177 + 5)
+			if zone.kind == "smash" then
+				for k = 1, 9 do
+					local x = zone.x0 + 36 + (k - 1) * 42 + zr:NextNumber(-8, 8)
+					local z = zr:NextNumber(-half * 0.5, half * 0.5)
+					if x >= x0 and x < x1 then smash(ci .. ":z" .. zone.i .. ":" .. k, x, z) end
+				end
+			elseif zone.kind == "speed" then
+				for k = 1, 3 do
+					local x = zone.x0 + 70 + (k - 1) * 140
+					if x >= x0 and x < x1 then pad(ci .. ":zp" .. zone.i .. ":" .. k, x) end
+				end
+			end
+		end
 		self._objects[ci] = out
 		return out
 	end
@@ -867,6 +884,43 @@ function Track:setRun(runSeed: number, luck: number?, toolboxRate: number?)
 	self._hazards = {}
 	self._keys = {}
 	self._targets = {}
+	self._zones = nil
+	self.skillKind = nil
+end
+
+--==============================================================
+-- skill zones: stretches of road set out for the launch tyre's skill (RunSim sets the kind each run;
+-- "air", "smash" or "speed"). They start well into the run and come every couple of thousand studs.
+-- A smash zone carries a scatter of extra smashables, a speed zone a line of pads; an air zone is an
+-- updraft and needs nothing on the road.
+--==============================================================
+local ZONE_LEN = 420
+function Track:setSkillKind(kind: string?)
+	if self.skillKind == kind then return end
+	self.skillKind = kind
+	self._objects = {}
+	self._zones = nil
+end
+
+-- the zones whose stretch overlaps [x0, x1)
+function Track:skillZones(x0: number, x1: number)
+	if not self.skillKind or not self.isRoad then return {} end
+	local z = self._zones
+	if not z then
+		z = { list = {}, rng = Random.new((self.runSeed % 65536) * 7919 + 41), nextX = 2600 }
+		z.nextX += z.rng:NextNumber(0, 700)
+		self._zones = z
+	end
+	while z.nextX < x1 + ZONE_LEN do
+		local a = z.nextX
+		table.insert(z.list, { i = #z.list + 1, x0 = a, x1 = a + ZONE_LEN, kind = self.skillKind })
+		z.nextX = a + ZONE_LEN + z.rng:NextNumber(1900, 3200)
+	end
+	local out = {}
+	for _, zone in ipairs(z.list) do
+		if zone.x1 > x0 and zone.x0 < x1 then table.insert(out, zone) end
+	end
+	return out
 end
 
 --==============================================================

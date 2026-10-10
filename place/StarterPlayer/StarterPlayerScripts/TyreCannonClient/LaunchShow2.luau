@@ -42,6 +42,7 @@ local GRAVITY = Vector3.new(0, -60, 0)
 
 -- the timeline, in show seconds
 local LOB_START, LOB_END = 0.55, 0.98	-- the tyre's flight into the muzzle
+local RAM_T = 0.32					-- then down the bore to its seat
 local READY_AT = 1.5					-- the dial can come up
 local CHASE_AT = 0.42					-- after the shot: cut to the chase camera
 local WASH_AT, WASH_LEN = 0.92, 0.26	-- after the shot: the sky takes the screen
@@ -177,9 +178,13 @@ function LaunchShow2.new(_skinId: string?, plot: Instance?, cannon: Model?, scal
 			d.CastShadow = true
 		end
 	end
-	self.seat = muzzle - dir * (TYRE_D * 0.4)
+	-- it drops in at the mouth, then rolls down the bore and seats well inside the barrel: more than
+	-- half way back to the trunnion on the long racing barrels, never less than a tyre deep
+	local bore = math.max(0, (muzzle - self.trunnion):Dot(dir))
+	self.mouth = muzzle + dir * (TYRE_D * 0.1)
+	self.seat = muzzle - dir * math.clamp(bore * 0.62, TYRE_D * 0.95, TYRE_D * 2.8)
 	self.ramp = nil   -- (no launch ramp any more: the cannon fires straight out of its own barrel)
-	self.lobFrom = self.seat + dir * 9 + Vector3.new(0, 26, 0) - self.side * 2
+	self.lobFrom = self.mouth + dir * 9 + Vector3.new(0, 26, 0) - self.side * 2
 	self.spin = 0
 	self:placeTyre(self.lobFrom, 0)
 	self.tyre.Parent = workspace
@@ -621,12 +626,21 @@ function LaunchShow2:stepLoad(dt: number)
 	-- the lob: a curve from above the muzzle down into the bore, tumbling
 	if t >= LOB_START and t < LOB_END then
 		local u = (t - LOB_START) / (LOB_END - LOB_START)
-		local p1 = self.seat + self.dir * 7 + Vector3.new(0, 5, 0)
+		local p1 = self.mouth + self.dir * 7 + Vector3.new(0, 5, 0)
 		local a = self.lobFrom:Lerp(p1, u)
-		local b = p1:Lerp(self.seat, u)
+		local b = p1:Lerp(self.mouth, u)
 		self.spin += dt * 9
 		self:placeTyre(a:Lerp(b, u * u), self.spin)
-	elseif t >= LOB_END then
+	elseif t >= LOB_END and t < LOB_END + RAM_T then
+		-- rammed home: it rolls down the bore, quickening, and the barrel swallows it
+		local u = (t - LOB_END) / RAM_T
+		if not self.rolled then
+			self.rolled = true
+			Sound.play("land", { volume = 0.35, pitch = 1.6 })
+		end
+		self.spin -= dt * 14
+		self:placeTyre(self.mouth:Lerp(self.seat, u * u), self.spin)
+	elseif t >= LOB_END + RAM_T then
 		if not self.landed then
 			self.landed = true
 			self.landT = t
@@ -642,7 +656,9 @@ function LaunchShow2:stepLoad(dt: number)
 		dip += math.rad(1.6) * (self.shiftKick or 0)
 		self.pitch = dip
 		local settle = math.sin(lt * 20) * math.exp(-lt * 9) * 0.35
-		self:placeTyre(self.seat - self.dir * settle, self.spin)
+		-- it sits in the barrel, so it dips with it
+		local turn = CFrame.new(self.trunnion) * CFrame.fromAxisAngle(self.axle, dip) * CFrame.new(-self.trunnion)
+		self:placeTyre(turn * (self.seat - self.dir * settle), self.spin)
 		-- the shot builds: the barrel shudders harder and the breech vents
 		local charge = math.max(0, t - READY_AT)
 		self.rumble = math.min(1, charge / 4)
@@ -785,8 +801,8 @@ function LaunchShow2:release(_power: number, quality: number, grade: string?)
 	self.q = math.clamp(quality, 0, 1)
 	self.grade = grade or (quality >= 0.99 and "perfect" or "good")
 	-- if the dial is fired before the tyre's in, it's in now
-	if self.stage == "load" and self.t < LOB_END then
-		self.t = LOB_END
+	if self.stage == "load" and self.t < LOB_END + RAM_T then
+		self.t = LOB_END + RAM_T
 	end
 	self.chargeLen = CHARGE[self.grade] or 0
 	self.engageTo = 1

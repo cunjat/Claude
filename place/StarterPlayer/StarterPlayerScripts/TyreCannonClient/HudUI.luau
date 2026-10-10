@@ -247,9 +247,8 @@ function HudUI.new(parent: ScreenGui)
 	self.nitroKey.Size = UDim2.fromOffset(100, 18)
 	self.nitroKey.ZIndex = 6
 	self.nitroKey.Parent = nitro
-	-- the moves: a key tile each above the nitro (TUCK, FLOAT, DIVE, and the tyre's skill), lit
-	-- while it's working, filled while it's cooling, and the TUCK tile lights gold when a tuck now
-	-- pays (the road dropping away, or a hard landing coming)
+	-- the moves: a key tile each above the nitro (FLOAT, DIVE, and the tyre's skill), lit while it's
+	-- working, filled while it's cooling. Tucking has no tile: the tyre itself shows it
 	local moves = corner(root, Vector2.new(0.5, 1), UDim2.new(0.5, 0, 1, -66), Vector2.new(460, 64))
 	slide(moves, UDim2.fromOffset(0, 160))
 	self.moves = moves
@@ -285,19 +284,11 @@ function HudUI.new(parent: ScreenGui)
 		self.moveTiles[id] = rec
 		return rec
 	end
-	tile("tuck", "TUCK", touchOnly and "" or "SHIFT", C.teal, 0, 100)
-	tile("float", "FLOAT", touchOnly and "" or "W", C.blue, 108, 84)
-	tile("dive", "DIVE", touchOnly and "" or "S", C.orange, 200, 84)
-	tile("skill", "SKILL", touchOnly and "" or "E", PERFECT, 292, 168)
+	-- (no TUCK tile: the tyre itself glows when a tuck pays)
+	tile("float", "FLOAT", touchOnly and "" or "W", C.blue, 54, 84)
+	tile("dive", "DIVE", touchOnly and "" or "S", C.orange, 146, 84)
+	tile("skill", "SKILL", touchOnly and "" or "E", PERFECT, 238, 168)
 	self.moveTiles.skill.root.Visible = false
-	-- the big word when a tuck now pays
-	self.tuckCall = Kit.text("", 40, PERFECT, 3.5, ITALIC)
-	self.tuckCall.AnchorPoint = Vector2.new(0.5, 0.5)
-	self.tuckCall.Position = UDim2.new(0.5, 0, 0.64, 0)
-	self.tuckCall.Size = UDim2.fromOffset(520, 48)
-	self.tuckCall.TextTransparency = 1
-	self.tuckCall.ZIndex = 25
-	self.tuckCall.Parent = root
 
 	---------------------------------------------------------------
 	-- over the world: where you're heading
@@ -325,7 +316,7 @@ function HudUI.new(parent: ScreenGui)
 	local bl = corner(root, Vector2.new(0, 1), UDim2.new(0, 24, 1, -24), Vector2.new(420, 54))
 	self.hint = Kit.text(UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 		and "Drag to steer  ·  BOOST for nitro  ·  hills are your speed"
-		or "<b>MOUSE / A D</b> steer   <b>SPACE</b> nitro   <b>SHIFT</b> tuck   <b>W</b> float   <b>S</b> dive   <b>E</b> skill\nDown a hill is speed. Tuck on the way down, leave the crest, land on the slope.", 14, C.muted, 1.5, Kit.Body)
+		or "<b>MOUSE / A D</b> steer   <b>SPACE</b> nitro   <b>SHIFT</b> tuck   <b>W</b> float   <b>S</b> dive   <b>E</b> skill\nDown a hill is speed. Tuck when your tyre glows gold, and land on the slope.", 14, C.muted, 1.5, Kit.Body)
 	self.hint.TextXAlignment = Enum.TextXAlignment.Left
 	self.hint.TextWrapped = true
 	self.hint.Size = UDim2.fromOffset(420, 54)
@@ -540,44 +531,6 @@ end
 
 function HudUI:updateMoves(s, now: number)
 	local T = self.moveTiles
-	-- TUCK: its window while held, red while cramped, gold when a tuck now pays
-	local tk = T.tuck
-	local cue = s.tuckCue
-	local tf = math.clamp(s.tuckFrac or 1, 0, 1)
-	local used = if s.tuckCool then 1 elseif s.tucking then 1 - tf else 0
-	tk.cool.Size = UDim2.new(1, -8, used, -8 * used)
-	tk.cool.BackgroundColor3 = if s.tuckCool then Color3.fromRGB(120, 20, 20) else Color3.new(0, 0, 0)
-	local pulse = 0.5 + 0.5 * math.sin(now * 14)
-	if cue == "perfect" or cue == "land" then
-		lightTile(tk, true, PERFECT)
-		tk.glow.ImageTransparency = 0.05 + 0.3 * pulse
-		tk.name.Text = "TUCK!"
-	elseif cue == "soon" then
-		lightTile(tk, false)
-		tk.face.ImageColor3 = Color3.fromRGB(70, 72, 80):Lerp(PERFECT, 0.35 + 0.25 * pulse)
-		tk.name.Text = "TUCK"
-	elseif s.tucking or cue == "braced" or cue == "tucked" then
-		lightTile(tk, true, GOOD)
-		tk.name.Text = if cue == "braced" then "BRACED" else "TUCK"
-	else
-		lightTile(tk, false)
-		tk.name.Text = if s.tuckCool then "CRAMP" else "TUCK"
-	end
-	-- the big word
-	local call = self.tuckCall
-	local want = if cue == "perfect" then "TUCK!" elseif cue == "land" then "TUCK TO LAND!" else ""
-	if want ~= "" then
-		if call.Text ~= want then
-			call.Text = want
-			Kit.pop(call, 0.6, 0.18)
-		end
-		call.TextColor3 = PERFECT
-		call.TextTransparency = 0.05 + 0.25 * pulse
-	elseif call.TextTransparency < 1 then
-		call.TextTransparency = math.min(1, call.TextTransparency + 0.12)
-	end
-	local cst = call:FindFirstChildOfClass("UIStroke")
-	if cst then cst.Transparency = call.TextTransparency end
 	-- FLOAT and DIVE: lit while you hold them in the air
 	lightTile(T.float, s.floating == true)
 	lightTile(T.dive, s.diving == true)
@@ -702,6 +655,14 @@ function HudUI:event(e)
 			self:stamp("PERFECT TUCK", PERFECT, 44, 0, ("x%s"):format(Game.multText(e.combo)))
 		elseif e.what == "cramp" then
 			self:toast("CRAMP", C.muted, 22)
+		end
+	elseif k == "skillzone" then
+		if e.what == "ahead" then
+			self:toast(if e.ready then "SKILL ZONE AHEAD · " .. (e.name or "SKILL") else "SKILL ZONE AHEAD", PERFECT, 26)
+		elseif e.what == "bonus" then
+			self.shownChain = e.chain
+			self:setChain(e.chain, e.combo)
+			self:stamp("SKILL ZONE", PERFECT, 44, 0, e.name)
 		end
 	elseif k == "smooth" then
 		self.shownChain = e.chain

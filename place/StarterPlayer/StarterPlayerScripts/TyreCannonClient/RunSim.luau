@@ -30,6 +30,7 @@ local Game = require(Modules:WaitForChild("Game"))
 local TyreLook = require(script.Parent:WaitForChild("TyreLook"))
 local Kit = require(script.Parent:WaitForChild("Kit"))
 local TyreSkills = require(script.Parent:WaitForChild("TyreSkills"))
+local SkillZones = require(script.Parent:WaitForChild("SkillZones"))
 local WorldView = require(script.Parent.WorldView)
 local WindFX = require(script.Parent.WindFX)
 local VFX = require(script.Parent.VFX)
@@ -277,6 +278,8 @@ function RunSim.start(opts)
 		self.slowUntil = os.clock() + 0.55
 	end
 
+	-- the skill zones' furniture goes on the road before any of it is built
+	self.track:setSkillKind(SkillZones.kindOf(self.stats.skill))
 	self.world = WorldView.new(opts.trackId)
 	pcall(function() self.world:markBest(opts.best, opts.bestName) end)
 	self.world:ensure(self.x)
@@ -288,6 +291,16 @@ function RunSim.start(opts)
 
 	self.skin = Config.SkinsById[opts.skin or "stock"] or Config.SkinsById.stock
 	self.model, self.root, self.dust, self.glow, self.heatSkin, self.carcass = buildTyre(folder, opts)
+	-- the tuck shows on the tyre itself: it glows gold when a tuck now pays, teal while it's tucked
+	local tuckHl = Instance.new("Highlight")
+	tuckHl.Name = "TuckGlow"
+	tuckHl.Adornee = self.model
+	tuckHl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	tuckHl.FillTransparency = 1
+	tuckHl.OutlineTransparency = 1
+	tuckHl.Enabled = false
+	tuckHl.Parent = folder
+	self.tuckHl = tuckHl
 	self.wind = WindFX.new(folder)
 	self.windTier = 0
 
@@ -360,6 +373,7 @@ function RunSim.start(opts)
 	self.dust.Color = ColorSequence.new(self.tcfg.ground)
 
 	self.skills = TyreSkills.new(self, self.stats, opts.hudGui)
+	self.zones = SkillZones.new(self, self.stats.skill)
 	self:bindInput()
 	self.accumulator = 0
 	self.conn = RunService.RenderStepped:Connect(function(dt)
@@ -733,8 +747,7 @@ function RunSim:botStep()
 	local slope = track:slopeAt(self.x)
 	self.keys.boost = self.nitro > 20 and (self.grounded and slope > -0.02) and self.speed < 300
 	-- tuck as the road drops away (a PERFECT), let go before the legs cramp
-	local ahead = track:slopeAt(self.x + 70)
-	if self.grounded and slope > F.PerfectFlat and ahead < F.PerfectDrop then
+	if (self.perfectT or 0) > 0 then
 		self.keys.tuck = true
 	elseif not self.tucking or (self.tuckT or 0) > F.TuckWindow * 0.8 or slope > -0.02 then
 		self.keys.tuck = false
@@ -823,7 +836,6 @@ function RunSim:onLanding(land)
 		self.perfects += 1
 		self.nitro = math.min(self.nitroMax, self.nitro + F.LandNitro)
 		self:link()
-		self.hitStopUntil = os.clock() + 0.03
 		Sound.play("land", { volume = 0.45, pitch = 1.15 })
 		self.onEvent({ kind = "braced", chain = self.chain, combo = self.combo })
 		local skillPitch = self.skills:landed(impact)
@@ -932,10 +944,16 @@ function RunSim:step(dt: number)
 	-- the tuck, with its timing window (RunPhysics.tuck)
 	local tuck, tuckEvent = RunPhysics.tuck(self, self.keys.tuck == true or self.touch.tuck == true, self.terrain, F, dt)
 	if tuckEvent == "perfect" then
-		self.speed += F.PerfectKick * (stats.stage or 1)
+		-- the kick is fed in over a moment, a surge rather than a jolt
+		self.kickLeft = (self.kickLeft or 0) + F.PerfectKick * (stats.stage or 1)
+		self.kickRate = self.kickLeft / (F.PerfectKickTime or 0.4)
 		self.perfects += 1
 		self:link()
-		self.hitStopUntil = os.clock() + 0.03
+	end
+	if (self.kickLeft or 0) > 0 then
+		local add = math.min(self.kickLeft, (self.kickRate or 0) * dt)
+		self.kickLeft -= add
+		self.speed += add
 	end
 	if tuckEvent then self.onEvent({ kind = "tuck", what = tuckEvent, chain = self.chain, combo = self.combo }) end
 
@@ -977,6 +995,7 @@ function RunSim:step(dt: number)
 	local px, py = self.x, self.y
 	local inp = self.input
 	inp.aimYaw, inp.aimPitch, inp.tuck, inp.thrust = self.aimYaw, self.aimPitch, tuck, thrust + mods.thrust
+	inp.tuckAmt = self.tuckAmt
 	-- braced for the landing: tucked as it touches down, or a skill's slam (Meteor)
 	inp.brace = tuck or (sk.pounding == true)
 	inp.slam = sk.pounding == true
@@ -1091,6 +1110,7 @@ function RunSim:step(dt: number)
 					self:link()
 					self.hitStopUntil = os.clock() + 0.05
 					self.bonus += Config.Economy.CreditsPerSmash
+					if self.zones then self.zones:smashed() end
 					self.speed *= Config.Run.SmashKeep
 					self.shake = math.min(3, self.shake + 0.7)
 					self.world:shatter(o.key, vel)
@@ -1108,7 +1128,7 @@ function RunSim:step(dt: number)
 				if not self.usedPads[d.key] and math.abs(self.x - d.x) < 18
 					and math.abs(self.z - d.z) < (d.w / 2 + R) and (self.y - R - track:heightAt(d.x)) < 22 then
 					self.usedPads[d.key] = true
-					self.speed += d.power * (stats.stage or 1) ^ 0.5 * math.clamp(1.25 - self.speed / F.KickFade, 0.15, 1)
+					self.speed += (if self.zones then self.zones:padMult() else 1) * d.power * (stats.stage or 1) ^ 0.5 * math.clamp(1.25 - self.speed / F.KickFade, 0.15, 1)
 					self.pitch = math.max(self.pitch, 0.32)
 					self.aimPitch = math.max(self.aimPitch, 0.25)
 					self.grounded = false
@@ -1249,11 +1269,49 @@ function RunSim:step(dt: number)
 	-- the skills run after the velocity is set: whatever they add to it (Mini-Turbo, Drill Dash) is
 	-- picked up at the top of the next step instead of being written over
 	self.skills:step(dt)
+	if self.zones then self.zones:step(dt) end
 end
 
 --==============================================================
 -- frame
 --==============================================================
+-- the tyre's tuck glow: gold and pulsing when a tuck now pays (the road dropping away, or a hard
+-- landing coming), a faint gold edge as one comes up, teal while it's tucked, a red flicker on a
+-- cramp. It fades between them rather than switching.
+local GLOW_GOLD = Color3.fromRGB(255, 205, 60)
+local GLOW_TUCK = Color3.fromRGB(80, 230, 210)
+local GLOW_CRAMP = Color3.fromRGB(230, 70, 60)
+function RunSim:paintTuck(cue: string?, dt: number)
+	local hl = self.tuckHl
+	if not hl then return end
+	local t = os.clock()
+	local pulse = 0.5 + 0.5 * math.sin(t * 13)
+	local col, fill, line = GLOW_GOLD, 1, 1
+	if cue == "perfect" or cue == "land" then
+		col, fill, line = GLOW_GOLD, 0.45 + 0.25 * pulse, 0
+	elseif cue == "soon" then
+		col, fill, line = GLOW_GOLD, 0.92, 0.45 + 0.3 * pulse
+	elseif cue == "late" then
+		col, fill, line = GLOW_CRAMP, 1, 0.5
+	elseif self.tucking or cue == "braced" or cue == "tucked" then
+		col, fill, line = GLOW_TUCK, 1 - 0.3 * (self.tuckAmt or 0), 0.15
+	elseif (self.tuckCd or 0) > 0.25 then
+		col, fill, line = GLOW_CRAMP, 1, 0.75
+	end
+	local k = math.min(1, dt * 14)
+	self.glowFill = (self.glowFill or 1) + (fill - (self.glowFill or 1)) * k
+	self.glowLine = (self.glowLine or 1) + (line - (self.glowLine or 1)) * k
+	self.glowCol = (self.glowCol or col):Lerp(col, k)
+	local on = self.glowFill < 0.98 or self.glowLine < 0.98
+	if hl.Enabled ~= on then hl.Enabled = on end
+	if on then
+		hl.FillColor = self.glowCol
+		hl.OutlineColor = self.glowCol
+		hl.FillTransparency = self.glowFill
+		hl.OutlineTransparency = self.glowLine
+	end
+end
+
 function RunSim:frame(dt: number)
 	if self.finished then return end
 	-- the watchdog: a run that hasn't moved a stud in 6 real seconds is over, whatever caused it
@@ -1284,6 +1342,7 @@ function RunSim:frame(dt: number)
 	self.world:ensure(self.x)
 	self.world:update(dt, self.x)
 	self.skills:frame(dt)
+	if self.zones then self.zones:frame(dt) end
 
 	local R = P.TyreRadius
 	local F = Config.Run
@@ -1410,13 +1469,13 @@ function RunSim:frame(dt: number)
 	local cue: string? = nil
 	local tuckFree = not self.tucking and (self.tuckCd or 0) <= 0
 	if self.grounded then
-		local here = self.track:slopeAt(self.x)
-		local ahead = self.track:slopeAt(self.x + math.cos(self.yaw) * F.PerfectLook)
-		local further = self.track:slopeAt(self.x + math.cos(self.yaw) * F.PerfectLook * 2.2)
-		if here > F.PerfectFlat and ahead < F.PerfectDrop then
+		-- the same test the tuck itself makes (and its grace), so the glow never lies
+		if (self.perfectT or 0) > 0 then
 			cue = if tuckFree then "perfect" elseif self.tucking then "tucked" else nil
-		elseif here > F.PerfectFlat and further < F.PerfectDrop and self.speed > 60 then
+		elseif self.speed > 60 and RunPhysics.perfectAhead(self, self.terrain, F, 2) then
 			cue = "soon"
+		elseif self.tucking then
+			cue = "tucked"
 		end
 	else
 		local vyNow = math.sin(self.pitch) * self.speed
@@ -1431,6 +1490,7 @@ function RunSim:frame(dt: number)
 		end
 	end
 	self.tuckCue = cue
+	self:paintTuck(cue, dt)
 
 	if self.onTick then
 		local sk = self.skills
@@ -1478,6 +1538,8 @@ function RunSim:finish(reason: string)
 	end
 	self.draft = nil
 	if self.skills then self.skills:destroy() end
+	if self.zones then self.zones:destroy(); self.zones = nil end
+	pcall(function() self.track:setSkillKind(nil) end)
 	if self.conn then self.conn:Disconnect() end
 	self:unbindInput()
 	if self.rumble then self.rumble:Destroy(); self.rumble = nil end

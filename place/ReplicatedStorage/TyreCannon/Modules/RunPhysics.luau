@@ -22,12 +22,14 @@ export type State = {
 	grounded: boolean, bank: number,
 	-- the tuck (RunPhysics.tuck): held, for how long, cooling, and whether the key was down last step
 	tucking: boolean?, tuckT: number?, tuckCd: number?, tuckPrev: boolean?,
+	tuckAmt: number?, tuckBuf: number?, perfectT: number?,
 }
 
 export type Input = {
 	aimYaw: number,       -- radians, where the wheel points
 	aimPitch: number,     -- air only: + flare, - dive (about -0.6..0.6)
 	tuck: boolean,
+	tuckAmt: number?,     -- how far into the tuck (eased); the key alone if missing
 	thrust: number,       -- studs/s^2 along the path this step (nitro and quirks)
 	brace: boolean?,      -- braced for the landing (tucked as it touches down)
 	slam: boolean?,       -- a skill's slam (Meteor): it comes down keeping all its speed
@@ -48,22 +50,48 @@ export type Result = { tookOff: boolean, landing: Landing? }
 export type Terrain = { heightAt: (number) -> number, slopeAt: (number) -> number }
 
 -- The tuck is a crouch with a timing window: a press starts it, it works for TuckWindow seconds, then
--- the legs cramp and it's dead for TuckCool. Letting go early costs only TuckEarly. A press just as
--- the road drops away (flat or rising here, a steep fall within PerfectLook studs) is a PERFECT tuck:
--- it fires `perfect` once so the caller can give the kick. Returns whether the tuck is on this step
--- and an event ("tuck", "perfect", "cramp") on the step it happened.
+-- the legs cramp and it's dead for TuckCool. Letting go early costs only TuckEarly. It eases in and
+-- out (st.tuckAmt, 0..1) rather than snapping, and a press made a moment before the tuck is ready
+-- again is kept and starts it as soon as it is (TuckBuffer).
+-- A press just as the road drops away is a PERFECT tuck (RunPhysics.perfectAhead): it fires `perfect`
+-- once so the caller can give the kick. The same test drives the HUD's cue, and it stays good for
+-- PerfectGrace seconds after it stops being true, so a press on the cue never misses on a frame.
+-- Returns whether the tuck is on this step and an event ("tuck", "perfect", "cramp").
+
+-- whether the road ahead drops away enough for a PERFECT tuck: flat or rising here, and a steep fall
+-- coming within PerfectTime seconds at this speed (several looks, so a short dip between them or a
+-- fast tyre never slips past)
+function RunPhysics.perfectAhead(st: State, T: Terrain, F: any, scale: number?): boolean
+	if not st.grounded then return false end
+	if T.slopeAt(st.x) <= F.PerfectFlat then return false end
+	local reach = math.max(F.PerfectLook * 0.5, st.speed * (F.PerfectTime or 0.9)) * (scale or 1)
+	local c = math.cos(st.yaw)
+	for i = 1, 6 do
+		if T.slopeAt(st.x + c * reach * i / 6) < F.PerfectDrop then return true end
+	end
+	return false
+end
+
 function RunPhysics.tuck(st: State, pressed: boolean, T: Terrain, F: any, dt: number): (boolean, string?)
 	local edge = pressed and not st.tuckPrev
 	st.tuckPrev = pressed
 	st.tuckCd = math.max(0, (st.tuckCd or 0) - dt)
+	-- the perfect test, with its grace
+	if RunPhysics.perfectAhead(st, T, F) then
+		st.perfectT = F.PerfectGrace or 0.18
+	else
+		st.perfectT = math.max(0, (st.perfectT or 0) - dt)
+	end
+	-- a press during the cooldown is held for a moment
+	if edge then st.tuckBuf = F.TuckBuffer or 0.2 end
+	st.tuckBuf = math.max(0, (st.tuckBuf or 0) - dt)
 	local ev: string? = nil
-	if edge and st.tuckCd <= 0 then
-		st.tucking, st.tuckT = true, 0
+	if not st.tucking and pressed and (st.tuckBuf or 0) > 0 and st.tuckCd <= 0 then
+		st.tucking, st.tuckT, st.tuckBuf = true, 0, 0
 		ev = "tuck"
-		if st.grounded then
-			local here = T.slopeAt(st.x)
-			local ahead = T.slopeAt(st.x + math.cos(st.yaw) * F.PerfectLook)
-			if here > F.PerfectFlat and ahead < F.PerfectDrop then ev = "perfect" end
+		if (st.perfectT or 0) > 0 then
+			ev = "perfect"
+			st.perfectT = 0
 		end
 	end
 	if st.tucking then
@@ -79,6 +107,10 @@ function RunPhysics.tuck(st: State, pressed: boolean, T: Terrain, F: any, dt: nu
 			end
 		end
 	end
+	-- eased in and out: the drag, roll and turn it changes follow this, not the key
+	local want = if st.tucking then 1 else 0
+	local rate = if want > (st.tuckAmt or 0) then 9 else 6
+	st.tuckAmt = (st.tuckAmt or 0) + (want - (st.tuckAmt or 0)) * math.min(1, dt * rate)
 	return st.tucking == true, ev
 end
 
@@ -90,7 +122,8 @@ function RunPhysics.step(st: State, inp: Input, c: Ctx, T: Terrain, F: any, dt: 
 
 	-- steering: heavier the faster you go, a nudge in the air; bends on the ground scrub speed
 	local turn = F.TurnRate * c.turn / (1 + s / F.TurnFall * 0.5)
-	if inp.tuck then turn *= F.TuckTurn end
+	local tk = inp.tuckAmt or (if inp.tuck then 1 else 0)
+	turn *= 1 + (F.TuckTurn - 1) * tk
 	if not st.grounded then turn *= F.AirTurn end
 	local dyaw = math.clamp(inp.aimYaw - st.yaw, -turn * dt, turn * dt)
 	st.yaw += dyaw
@@ -100,7 +133,7 @@ function RunPhysics.step(st: State, inp: Input, c: Ctx, T: Terrain, F: any, dt: 
 	local py = st.y
 	if st.grounded then
 		local tp0 = math.atan(T.slopeAt(st.x))
-		local fric = (F.GroundFriction0 + s * F.GroundFriction1) * c.friction * c.fatigue * (inp.tuck and F.TuckRoll or 1)
+		local fric = (F.GroundFriction0 + s * F.GroundFriction1) * c.friction * c.fatigue * (1 + (F.TuckRoll - 1) * tk)
 		local sn = math.sin(tp0)
 		-- the arcade rule the hills run on: down a slope gravity pulls harder than it holds back up one
 		local pull = g * sn * (sn < 0 and F.HillDown or F.HillUp)
@@ -128,7 +161,7 @@ function RunPhysics.step(st: State, inp: Input, c: Ctx, T: Terrain, F: any, dt: 
 	local flare = math.clamp(inp.aimPitch / 0.5, 0, 1)
 	local dive = math.clamp(-inp.aimPitch / 0.5, 0, 1)
 	local hs, vy = math.cos(st.pitch) * s, math.sin(st.pitch) * s
-	local drag = (F.Drag0 + s * F.Drag1) * s * c.drag * (inp.tuck and F.TuckDrag or 1)
+	local drag = (F.Drag0 + s * F.Drag1) * s * c.drag * (1 + (F.TuckDrag - 1) * tk)
 	drag *= (1 + F.FlareDrag * flare) * c.fatigue
 	local s2 = math.clamp(s + (inp.thrust - drag) * dt, 0, c.maxSpeed)
 	local k = s2 / math.max(s, 1)
