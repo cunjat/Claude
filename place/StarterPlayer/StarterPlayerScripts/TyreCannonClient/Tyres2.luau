@@ -85,6 +85,9 @@ function Tyres2.new(gui: ScreenGui, remotes: Instance)
 	})
 	UI.mk("UIListLayout", { Padding = UDim.new(0, 12), SortOrder = Enum.SortOrder.LayoutOrder, Parent = self.list })
 	UI.mk("UIPadding", { PaddingTop = UDim.new(0, 20), PaddingLeft = UDim.new(0, 8), PaddingBottom = UDim.new(0, 40), Parent = self.list })
+	-- a card's 3D thumbnail is only made once it scrolls into view (a big collection would
+	-- otherwise build a viewport and a model for every card at once)
+	self.list:GetPropertyChangedSignal("CanvasPosition"):Connect(function() self:fillVisible() end)
 
 	-- the Index's own header: what it is, how far you are, what finishing a row pays
 	local info = UI.mk("Frame", { Name = "IndexInfo", Position = UDim2.fromOffset(26, 106), Size = UDim2.fromOffset(596, 78), BackgroundTransparency = 1, Visible = false, ZIndex = 6, Parent = face })
@@ -184,8 +187,25 @@ function Tyres2.new(gui: ScreenGui, remotes: Instance)
 	return self
 end
 
+-- what the screen shows, as a string: a profile push that changes none of it (cash from the
+-- auto-cannon, a key) doesn't rebuild the cards
+local function signature(p): string
+	local v = p and p.v2
+	if not v then return "" end
+	local parts = { tostring(v.launch), table.concat(v.spares, ","), tostring(v.indexPaid), tostring(#v.inv),
+		tostring((v.mach and v.mach.rack) or 0), tostring(v.passes and v.passes.spares2) }
+	for _, t in ipairs(v.inv) do table.insert(parts, ("%d:%s:%d:%s:%s"):format(t.uid, t.id, t.forge or 0, t.mut or "", t.fav and "f" or "")) end
+	local idx = {}
+	for id in pairs(v.index) do table.insert(idx, id) end
+	table.sort(idx)
+	table.insert(parts, table.concat(idx, ","))
+	return table.concat(parts, "|")
+end
+
 function Tyres2:setProfile(p)
 	self.profile = p
+	local sig = signature(p)
+	if sig == self.shownSig then return end
 	if self.root.Visible then self:render() end
 end
 
@@ -233,7 +253,7 @@ function Tyres2:cell(order: number, tyreId: string, forge: number, count: number
 	-- the selected line: white, just inside the rarity edge
 	local sel = UI.mk("Frame", { Name = "Selected", Position = UDim2.fromOffset(7, 7), Size = UDim2.new(1, -14, 1, -14), BackgroundTransparency = 1, Visible = false, ZIndex = 9, Parent = holder }, { UI.corner(5) })
 	UI.mk("UIStroke", { Color = C.white, Thickness = 3, Parent = sel })
-	local thumb, model = TyreShow.thumb(holder, tyreId, known, UDim2.fromOffset(118, 104), UDim2.new(0.5, 0, 0, 8))
+	local thumb, model = nil, nil
 	if not known then
 		-- not found yet: a coloured backlight behind the ghost of the tyre, and a fog over its foot
 		UI.mk("ImageLabel", {
@@ -247,7 +267,6 @@ function Tyres2:cell(order: number, tyreId: string, forge: number, count: number
 		UI.mk("UIGradient", {
 			Rotation = 90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.9), NumberSequenceKeypoint.new(0.55, 0.45), NumberSequenceKeypoint.new(1, 0.1) }), Parent = fog,
 		})
-		local _ = thumb
 	end
 	local name = Kit.text(if known then t.name else "???", 15, if known then C.text else C.muted, 1.5)
 	name.Position = UDim2.fromOffset(4, 112)
@@ -289,9 +308,26 @@ function Tyres2:cell(order: number, tyreId: string, forge: number, count: number
 	end)
 	b.MouseButton1Down:Connect(function() Kit.tween(holder, 0.05, { Position = UDim2.fromOffset(0, 1) }) end)
 	b.Activated:Connect(onPick)
-	local cell = { button = b, holder = holder, sel = sel, model = model, id = tyreId, forge = forge }
+	local cell = { button = b, holder = holder, sel = sel, model = model, id = tyreId, forge = forge, known = known, thumb = thumb }
 	table.insert(self.cells, cell)
 	return cell
+end
+
+-- make the thumbnails of the cards that are in (or just below) the list's view
+function Tyres2:fillVisible()
+	local list = self.list
+	if not (list and self.root.Visible) then return end
+	local top = list.AbsolutePosition.Y - 60
+	local bottom = list.AbsolutePosition.Y + list.AbsoluteSize.Y + 220
+	for _, c in ipairs(self.cells or {}) do
+		if not c.thumb and c.holder.Parent then
+			local y = c.button.AbsolutePosition.Y
+			if y + c.button.AbsoluteSize.Y >= top and y <= bottom then
+				c.thumb, c.model = TyreShow.thumb(c.holder, c.id, c.known, UDim2.fromOffset(118, 104), UDim2.new(0.5, 0, 0, 8))
+				if self.selCell == c and c.model then TyreShow.pose(c.model, self.turnYaw or TyreShow.THUMB_YAW) end
+			end
+		end
+	end
 end
 
 function Tyres2:markSelected(cell)
@@ -327,6 +363,7 @@ function Tyres2:render(fresh: boolean?)
 	local p = self.profile
 	if not p or not p.v2 then return end
 	local v = p.v2
+	self.shownSig = signature(p)
 	for _, c in ipairs(self.list:GetChildren()) do
 		if c:IsA("GuiObject") then c:Destroy() end
 	end
@@ -476,10 +513,16 @@ function Tyres2:render(fresh: boolean?)
 		end
 	end
 	if fresh then
+		-- (only the first rows cascade in; the rest are below the fold anyway)
 		local list = {}
-		for _, c in ipairs(self.cells) do table.insert(list, c.holder) end
+		for i, c in ipairs(self.cells) do
+			if i <= 16 then table.insert(list, c.holder) end
+		end
 		Kit.cascade(list, 0.02)
 	end
+	-- the thumbnails for what's in view, once the grid has laid itself out
+	task.defer(function() self:fillVisible() end)
+	task.delay(0.1, function() self:fillVisible() end)
 end
 
 -- the copy of a tyre to act on (one that isn't equipped, if there is one) and whether this tyre

@@ -165,21 +165,27 @@ function Preload.run(gui: Instance, report: (number, string, number) -> ())
 		table.insert(stages[i], x)
 	end
 
-	-- 1 the yard
+	-- 1 the yard: every stage of every yard, its machines and cannons, the lobby, the workbench and
+	-- the garage, the props and the people
 	local yard = {}
-	contentOf(child(assets, "Props"), yard)
-	contentOf(child(assets, "Characters"), yard)
+	for _, name in ipairs({ "Props", "Characters", "Stages", "Lobby", "Cannons", "Machines", "Workshop", "Garage" }) do
+		contentOf(child(assets, name), yard)
+	end
 	contentOf(child(world, "Decor"), yard)
 	for _, x in ipairs(yard) do add(1, x) end
-	-- 2 the road: obstacles, roadside props, every effect
+	-- 2 the road: obstacles, roadside props, every zone's scenery, the run's pieces, skills, effects
 	local list = {}
 	contentOf(child(world, "Obstacles"), list)
 	contentOf(child(world, "Props"), list)
-	contentOf(child(assets, "VFX"), list)
+	for _, name in ipairs({ "VFX", "Scenery", "Run", "Skills" }) do
+		contentOf(child(assets, name), list)
+	end
 	for _, x in ipairs(list) do add(2, x) end
-	-- 3 the tyres: wheel parts, effect sheets, particle textures
+	-- 3 the tyres: every collectable tyre's model (the index, the crates and the workbench show
+	-- them all), the stock wheel, effect sheets, particle textures
 	list = {}
 	contentOf(child(assets, "Wheel"), list)
+	contentOf(child(assets, "Tyres"), list)
 	for _, x in ipairs(list) do add(3, x) end
 	if type(PackFX) == "table" and PackFX.Sheet then
 		for _, id in pairs(PackFX.Sheet) do add(3, id) end
@@ -206,6 +212,11 @@ function Preload.run(gui: Instance, report: (number, string, number) -> ())
 	local Gauge = (select(2, pcall(require, parent:WaitForChild("Gauge"))) :: any)
 	if type(Gauge) == "table" and Gauge.Art then
 		for _, id in pairs(Gauge.Art) do add(5, id) end
+	end
+	-- every id the scripts name in code (zone pictures, stage cards, the crate shutter, the logo...)
+	local okIds, ids = pcall(require, parent:WaitForChild("PreloadIds", 5))
+	if okIds and type(ids) == "table" then
+		for _, id in ipairs(ids) do add(5, id) end
 	end
 	local faces: { [string]: boolean } = {}
 	for _, d in ipairs(gui:GetDescendants()) do

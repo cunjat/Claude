@@ -1,9 +1,11 @@
 --!strict
 -- TYRE CANNON :: Loading (ReplicatedFirst)
--- The loading plate: a grey, scratched steel plate (art/ui/ps/intro.jsx, made in Photoshop). The
--- three words of the logo come in one after another (UNTITLED slides in, TYRE drops and lands with a
--- shake and a puff of dust, GAME pops up), then the tyre rolls onto the bar, and the bar fills one
--- step at a time: waking up, fetching your save, then each of Preload's stages. Every step stays on
+-- The loading plate. It starts on the steel plate (art/ui/ps/intro.jsx) and, once the world is in,
+-- the plate fades away onto the lobby itself in a slow orbit, darkened top and bottom so the words
+-- read. The title is drawn here in the kit's look (a gold-to-orange fill, a thick near-black edge,
+-- a drop shadow): its letters slam in one after another, settle with a squash, a shine runs across
+-- and they ride a slow wave. Then the tyre rolls onto the bar, and the bar fills one step at a
+-- time: waking up, fetching your save, then each of Preload's stages. Every step stays on
 -- screen a moment even when it loads instantly, so the bar glides instead of jumping, and it never
 -- lifts before 100%. When it's full the tyre drives off the screen and the plate goes with it,
 -- straight into the game: no title, no cannon.
@@ -23,10 +25,16 @@ local ART = {
 	game = { id = "rbxassetid://85510895823582", w = 965, h = 279 },
 }
 local TYRE = "rbxassetid://126515425222861" -- the game tyre, face-on (the icon studio's)
+-- the title, drawn as text (set USE_ART to show the old word images instead)
+local USE_ART = false
+local TITLE_TOP = "UNTITLED"
+local TITLE_WORDS = { "TYRE", "GAME" }
 local TIPS = {
 	"Hills are your speed. Tuck on the way down, leave the crest, land on the slope.",
 	"Crates open with keys. Grab them off the road.",
-	"Five copies of a tyre fuse into a Gold one.",
+	"Rarer tyres fuse with fewer copies: six Commons, four Legendaries, two Secrets.",
+	"Hold TUCK as you touch down to brace the landing. A timed landing is never a crash.",
+	"Tyres from the Highway and Dunes crates pay x2 and x4, at every rarity.",
 	"Your best run rolls beside you as a ghost. Beat it.",
 	"Upgrade your plot to move up a stage: a new cannon and a faster start.",
 	"A Heat starts every few minutes. Join it from the top of the screen.",
@@ -135,7 +143,7 @@ local function word(w, x: number, y: number, width: number, height: number)
 	local holder = mk("Frame", { Position = UDim2.fromOffset(x, y), Size = UDim2.fromOffset(width, height), BackgroundTransparency = 1, ZIndex = 6, Parent = logoHolder })
 	local img = mk("ImageLabel", {
 		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
-		Image = w.id, ScaleType = Enum.ScaleType.Fit, ImageTransparency = 1, ZIndex = 6, Parent = holder,
+		Image = w.id, ScaleType = Enum.ScaleType.Fit, ImageTransparency = 1, ZIndex = 6, Parent = holder, Visible = USE_ART,
 	})
 	return holder, img
 end
@@ -143,6 +151,104 @@ local wUntitled, iUntitled = word(ART.untitled, (LOGO_W - uw) / 2, 0, uw, uh)
 local wTyre, iTyre = word(ART.tyre, rowX, uh + 10, tw_, th)
 local wGame, iGame = word(ART.game, rowX + tw_ + gap, uh + 10, gw, gh)
 local restUntitled, restTyre = wUntitled.Position, wTyre.Position
+
+-- the drawn title: one label a letter (fill, edge, shadow), laid out by its real width
+local ITALIC = Font.new("rbxasset://fonts/families/Montserrat.json", Enum.FontWeight.Black, Enum.FontStyle.Italic)
+local TextService = game:GetService("TextService")
+local letters: { { holder: Frame, label: TextLabel, shadow: TextLabel, scale: UIScale, rest: UDim2, delay: number, big: boolean } } = {}
+local shineGrads: { UIGradient } = {}
+local function letterWidth(ch: string, size: number): number
+	local ok, v = pcall(function()
+		local params = Instance.new("GetTextBoundsParams")
+		params.Text = ch
+		params.Font = ITALIC
+		params.Size = size
+		params.Width = 1000
+		return TextService:GetTextBoundsAsync(params)
+	end)
+	if ok and v then return v.X end
+	return size * 0.68
+end
+local function drawWord(text: string, size: number, y: number, big: boolean, delay0: number, fillTop: Color3, fillBottom: Color3)
+	local widths, total = {}, 0
+	for i = 1, #text do
+		local w = letterWidth(text:sub(i, i), size) + (big and 2 or 1)
+		widths[i] = w
+		total += w
+	end
+	local x = (LOGO_W - total) / 2
+	for i = 1, #text do
+		local ch = text:sub(i, i)
+		local h = mk("Frame", {
+			AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.fromOffset(x + widths[i] / 2, y + size), Size = UDim2.fromOffset(widths[i] + 8, size + 10),
+			BackgroundTransparency = 1, ZIndex = 6, Parent = logoHolder,
+		})
+		local sc = mk("UIScale", { Scale = 1, Parent = h })
+		local shadow = mk("TextLabel", {
+			Position = UDim2.fromOffset(4, 7), Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = ch, FontFace = ITALIC,
+			TextSize = size, TextColor3 = Color3.new(0, 0, 0), TextTransparency = 1, ZIndex = 6, Parent = h,
+		})
+		local l = mk("TextLabel", {
+			Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = ch, FontFace = ITALIC, TextSize = size,
+			TextColor3 = Color3.new(1, 1, 1), TextTransparency = 1, ZIndex = 7, Parent = h,
+		})
+		mk("UIGradient", { Rotation = 90, Color = ColorSequence.new(fillTop, fillBottom), Parent = l })
+		mk("UIStroke", { Color = Color3.fromRGB(16, 12, 10), Thickness = big and 5 or 3, Transparency = 1, LineJoinMode = Enum.LineJoinMode.Round, Parent = l })
+		-- the shine: a white copy over the letter, shown only where a bright band passes
+		local shine = mk("TextLabel", {
+			Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = ch, FontFace = ITALIC, TextSize = size,
+			TextColor3 = Color3.new(1, 1, 1), TextTransparency = 0.15, ZIndex = 8, Visible = false, Parent = h,
+		})
+		local g = mk("UIGradient", {
+			Rotation = 20, Offset = Vector2.new(-1.6, 0),
+			Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.42, 1), NumberSequenceKeypoint.new(0.5, 0.1),
+				NumberSequenceKeypoint.new(0.58, 1), NumberSequenceKeypoint.new(1, 1) }), Parent = shine,
+		})
+		table.insert(shineGrads, g)
+		table.insert(letters, { holder = h, label = l, shadow = shadow, scale = sc, rest = h.Position, delay = delay0 + (i - 1) * 0.055, big = big })
+		x += widths[i]
+	end
+end
+if not USE_ART then
+	local topSize, bigSize = 40, 104
+	drawWord(TITLE_TOP, topSize, 0, false, 0.12, Color3.fromRGB(255, 255, 255), Color3.fromRGB(196, 200, 210))
+	drawWord(table.concat(TITLE_WORDS, " "), bigSize, topSize + 12, true, 0.34, Color3.fromRGB(255, 226, 92), Color3.fromRGB(255, 120, 30))
+	logoHolder.Size = UDim2.fromOffset(LOGO_W, topSize + 12 + bigSize + 14)
+end
+-- each letter drops from above, lands with a squash and settles; then they ride a slow wave
+local shineDone = false
+local function animateLetters(t: number)
+	for i, L in ipairs(letters) do
+		local a = clamp01((t - L.delay) / 0.32)
+		local drop = (L.big and -220 or -120) * (1 - easeIn(a))
+		local settle = 0
+		local squash = 1
+		if a >= 1 then
+			local s = t - L.delay - 0.32
+			settle = -10 * math.exp(-s * 8) * math.abs(math.sin(s * 14))
+			squash = 1 - 0.18 * math.exp(-s * 11) * math.cos(s * 20) ^ 2
+			if t > 1.6 then settle += math.sin((t - 1.6) * 2.2 - i * 0.45) * (L.big and 3 or 2) end
+		end
+		L.holder.Position = L.rest + UDim2.fromOffset(0, drop + settle)
+		L.scale.Scale = if a < 1 then 1.12 - 0.12 * a else squash
+		L.holder.Rotation = (1 - a) * (i % 2 == 0 and 9 or -9)
+		local vis = clamp01((t - L.delay) / 0.08)
+		L.label.TextTransparency = 1 - vis
+		L.shadow.TextTransparency = 1 - vis * 0.55
+		local st = L.label:FindFirstChildOfClass("UIStroke")
+		if st then st.Transparency = 1 - vis end
+	end
+	-- the shine, once everything has landed
+	if not shineDone and t > 1.25 then
+		shineDone = true
+		for _, g in ipairs(shineGrads) do
+			local sh = g.Parent :: TextLabel
+			sh.Visible = true
+			local tw = tween(g, 0.7, { Offset = Vector2.new(1.6, 0) }, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
+			tw.Completed:Connect(function() sh.Visible = false end)
+		end
+	end
+end
 local tagline = mk("TextLabel", {
 	AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.36, 110), Size = UDim2.fromOffset(600, 22),
 	BackgroundTransparency = 1, Text = "LAUNCH IT   ·   UPGRADE IT   ·   SEND IT FURTHER", FontFace = DISPLAY, TextSize = 17,
@@ -246,6 +352,16 @@ local function puff(x: number, y: number, count: number, spread: number)
 	end
 end
 local function landingDust()
+	if not USE_ART and #letters > 0 then
+		-- under the big word, where its letters land
+		local a = letters[#letters].holder
+		local first = nil
+		for _, L in ipairs(letters) do if L.big and not first then first = L.holder end end
+		local f = first or a
+		local x0, x1 = f.AbsolutePosition.X, a.AbsolutePosition.X + a.AbsoluteSize.X
+		puff((x0 + x1) / 2, a.AbsolutePosition.Y + a.AbsoluteSize.Y, 16, math.floor((x1 - x0) * 0.45))
+		return
+	end
 	local base = wTyre.AbsolutePosition + Vector2.new(wTyre.AbsoluteSize.X / 2, wTyre.AbsoluteSize.Y)
 	puff(base.X, base.Y, 12, math.floor(wTyre.AbsoluteSize.X * 0.45))
 end
@@ -304,6 +420,7 @@ local rollConn = RunService.RenderStepped:Connect(function(dt)
 
 	-- the logo: UNTITLED slides in, TYRE drops and lands, GAME pops up; then they sway a little
 	fade.BackgroundTransparency = clamp01(t / 0.35)
+	if not USE_ART then animateLetters(t) end
 	local land = 0.62
 	local a = clamp01((t - 0.12) / 0.45)
 	wUntitled.Position = restUntitled + UDim2.fromOffset(-360 * (1 - backOut(a)), 0)
@@ -374,7 +491,7 @@ local rollConn = RunService.RenderStepped:Connect(function(dt)
 	roller.ImageTransparency = 1 - clamp01((t - 0.7) / 0.15)
 	pct.Text = math.floor(shown * 100 + 0.5) .. "%"
 end)
-task.delay(0.62, landingDust)
+task.delay(if USE_ART then 0.62 else 0.95, landingDust)
 
 -- a new tip every few seconds
 task.spawn(function()
@@ -396,6 +513,45 @@ end)
 if not game:IsLoaded() then game.Loaded:Wait() end
 ownDone[1] = 1
 mark("game loaded")
+
+-- the plate fades onto the lobby itself: the camera circles the plaza slowly in the day's light,
+-- with a dark wash top and bottom so the title and the bar read over it. (If there's no lobby,
+-- the plate just stays.)
+local orbitConn: RBXScriptConnection? = nil
+task.spawn(function()
+	local lobby = workspace:WaitForChild("Lobby", 15)
+	local plaza = lobby and lobby:WaitForChild("Plaza", 10)
+	if not plaza then return end
+	local centre = Vector3.new(-6000, 0, 6000)
+	local floor = plaza:FindFirstChild("PlazaFloor") :: BasePart?
+	if floor then centre = floor.Position end
+	local cam = workspace.CurrentCamera
+	cam.CameraType = Enum.CameraType.Scriptable
+	local t0 = os.clock()
+	orbitConn = RunService.RenderStepped:Connect(function()
+		local t = os.clock() - t0
+		local a = 0.6 + t * 0.045
+		local r = 300 + math.sin(t * 0.13) * 30
+		local eye = centre + Vector3.new(math.cos(a) * r, 95 + math.sin(t * 0.2) * 12, math.sin(a) * r)
+		cam.CameraType = Enum.CameraType.Scriptable
+		cam.CFrame = CFrame.lookAt(eye, centre + Vector3.new(0, 18, 0))
+		cam.FieldOfView = 55
+	end)
+	-- the wash, then the plate lifts off it
+	for _, top in ipairs({ true, false }) do
+		local v = mk("Frame", {
+			AnchorPoint = Vector2.new(0, top and 0 or 1), Position = UDim2.fromScale(0, top and 0 or 1), Size = UDim2.fromScale(1, top and 0.62 or 0.5),
+			BackgroundColor3 = Color3.fromRGB(8, 8, 12), BorderSizePixel = 0, ZIndex = 4, BackgroundTransparency = 1, Parent = door,
+		})
+		local g = mk("UIGradient", { Rotation = top and 90 or -90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.15), NumberSequenceKeypoint.new(1, 1) }), Parent = v })
+		local _ = g
+		tween(v, 1.2, { BackgroundTransparency = 0 })
+	end
+	task.wait(0.6)
+	tween(doorImg, 1.4, { ImageTransparency = 1 })
+	tween(door, 1.4, { BackgroundTransparency = 1 })
+	tween(black, 1.4, { BackgroundTransparency = 1 })
+end)
 
 local Root = ReplicatedStorage:WaitForChild("TyreCannon", 60)
 if Root then
@@ -466,6 +622,7 @@ do
 end
 
 -- hand the world over: the camera behind the character, the menus back
+if orbitConn then orbitConn:Disconnect() end
 do
 	local cam = workspace.CurrentCamera
 	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")

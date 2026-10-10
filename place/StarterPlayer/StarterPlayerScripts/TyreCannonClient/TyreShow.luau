@@ -117,6 +117,18 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 	return api
 end
 
+-- a thumb's model is built (scaled, stickers laid) once per tyre and cloned after that: a clone is
+-- far cheaper than building and scaling it again for every card
+local thumbCache: { [string]: Model } = {}
+local function thumbModel(tyreId: string): Model
+	local tpl = thumbCache[tyreId]
+	if not tpl or tpl.Parent ~= nil then
+		tpl = TyreLook.model(tyreId, D, "Thumb")
+		thumbCache[tyreId] = tpl
+	end
+	return tpl:Clone()
+end
+
 function TyreShow.thumb(parent: Instance, tyreId: string, known: boolean, size: UDim2, pos: UDim2): (ViewportFrame, Model?)
 	local vp = UI.mk("ViewportFrame", {
 		Name = "Thumb", AnchorPoint = Vector2.new(0.5, 0), Position = pos, Size = size, BackgroundTransparency = 1,
@@ -124,7 +136,7 @@ function TyreShow.thumb(parent: Instance, tyreId: string, known: boolean, size: 
 		ImageTransparency = if known then 0 else 0.45, ZIndex = 8, Parent = parent,
 	})
 	lights(vp)
-	local m = TyreLook.model(tyreId, D, "Thumb")
+	local m = thumbModel(tyreId)
 	m.Parent = vp
 	local cam = Instance.new("Camera")
 	cam.FieldOfView = 30
