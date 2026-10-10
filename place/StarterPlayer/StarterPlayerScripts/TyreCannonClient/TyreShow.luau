@@ -53,9 +53,13 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 	-- framed so the tyre's tread lands on the floor shadow (77% down the well)
 	cam.FieldOfView = 30
 	local CAM_SHOW = CFrame.lookAt(Vector3.new(0, 4.2, 22), Vector3.new(0, 3.1, 0))
-	-- the sticker view: straight onto the sidewall, close, the hub in the middle
-	local EDIT_DIST = 12.5
-	local CAM_EDIT = CFrame.lookAt(Vector3.new(0, D / 2, EDIT_DIST), Vector3.new(0, D / 2, 0))
+	-- the sticker view: straight onto the sidewall, the hub in the middle, as close as the frame's
+	-- shape lets the whole wheel fit (worked out when the view opens, for the size it's opening to)
+	local function camEdit(aspect: number): CFrame
+		local t = math.tan(math.rad(cam.FieldOfView / 2))
+		local dist = (D / 2) * 1.12 / (t * math.min(1, aspect))
+		return CFrame.lookAt(Vector3.new(0, D / 2, dist), Vector3.new(0, D / 2, 0))
+	end
 	cam.CFrame = CAM_SHOW
 	cam.Parent = vp
 	vp.CurrentCamera = cam
@@ -77,8 +81,10 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 	local yaw = THUMB_YAW
 	local turning = true
 	local editing = false
+	local held = 0      -- a drag turned it by hand: the slow turn waits this long to pick up again
 	local conn = RunService.RenderStepped:Connect(function(dt)
-		if model and turning and root.Visible then
+		held = math.max(0, held - dt)
+		if model and turning and held <= 0 and root.Visible then
 			yaw += dt * 0.55
 			TyreShow.pose(model, yaw)
 		end
@@ -100,8 +106,16 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 		TyreShow.pose(model :: Model, if editing then 0 else yaw)
 	end
 	function api.setTurning(on: boolean) turning = on end
-	-- the sticker view: the tyre stops, turns its face to you and the camera closes in on it
-	function api.setEdit(on: boolean)
+	-- turned by hand (a drag across the bay): pixels across become a turn, and it holds there a moment
+	function api.spin(dx: number)
+		if editing or not model then return end
+		yaw += dx * 0.012
+		held = 1.6
+		TyreShow.pose(model, yaw)
+	end
+	-- the sticker view: the tyre stops, turns its face to you and the camera closes in on it. `aspect`
+	-- is the width over the height of the frame it will have (it may be growing as this starts)
+	function api.setEdit(on: boolean, aspect: number?)
 		if on == editing then return end
 		editing = on
 		turning = not on
@@ -110,6 +124,8 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 			yaw = 0
 			if model then TyreShow.pose(model, 0) end
 		end
+		local size = root.AbsoluteSize
+		local CAM_EDIT = camEdit(aspect or (if size.Y > 0 then size.X / size.Y else 1))
 		local cv = Instance.new("CFrameValue")
 		cv.Value = cam.CFrame
 		cv.Changed:Connect(function(v) cam.CFrame = v end)
@@ -118,10 +134,9 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 		tw.Completed:Connect(function() cv:Destroy() end)
 		tw:Play()
 	end
-	-- in the sticker view: pixels on screen per stud at the sidewall, and the wheel's radius in studs
-	function api.editScale(): (number, number)
-		return root.AbsoluteSize.Y / (2 * EDIT_DIST * math.tan(math.rad(cam.FieldOfView / 2))), D / 2
-	end
+	function api.isEditing(): boolean return editing end
+	-- the bay's camera (the Workbench projects the stickers through it to find them on screen)
+	function api.camera(): Camera return cam end
 	-- the tyre standing in the bay now (the Workbench lays stickers on it)
 	function api.model(): Model? return model end
 	function api.setRarity(c: Color3, back: Color3?)

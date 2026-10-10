@@ -4,10 +4,12 @@
 --   left     the selected tyre on the bench, turning slowly, stickers and all; its name, rarity, what it
 --            does, and a FAV pill (a favourite sorts first and is never used up by a Fuse)
 --   Tyres    organize: sort by best, rarity, newest or name; show only favourites; pick one
---   Stickers dress the selected tyre: the bench closes in on its sidewall, face-on; pick a sticker
---            from the pack and it goes on, outlined; drag it round the wheel with the mouse (or a
---            finger), scroll over it to size it, or use the sliders (round, out, size, turn, both
---            sides); up to Config.Stickers.MaxPerTyre; Save keeps it (it goes on the tyre in your runs too)
+--   Stickers dress the selected tyre: the bay grows and the tyre comes forward; pick a sticker from
+--            the pack (or click one on the tyre) and the view closes in on the sidewall, face-on, the
+--            sticker outlined; drag it round the wheel with the mouse (or a finger), scroll over it to
+--            size it, or use the sliders (round, out, size, turn, both sides); up to
+--            Config.Stickers.MaxPerTyre; Save keeps it (it goes on the tyre in your runs too), lets
+--            the sticker go and leaves the tyre turning. Out of the close view, drag to turn the tyre
 --   Workbench.new(gui, remotes) · :setProfile(p) · :open() · :close() · :isOpen()
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -406,6 +408,7 @@ function Workbench:buildStickers(page: Frame)
 		self.stickers = {}
 		self.selSticker = nil
 		self.dirty = true
+		self:setEditing(false)
 		self:redress()
 		self:refreshStickerUI()
 	end
@@ -413,7 +416,13 @@ function Workbench:buildStickers(page: Frame)
 	save.root.Position = UDim2.fromOffset(0, 412)
 	save.root.ZIndex = 8
 	save.root.Parent = right
-	save.onClick = function() self:saveDesign() end
+	save.onClick = function()
+		-- saved: the sticker's let go and the tyre turns again, to be looked at all round
+		self:saveDesign()
+		self.selSticker = nil
+		self:setEditing(false)
+		self:refreshStickerUI()
+	end
 	self.saveBtn = save
 	rm.root.Position = UDim2.fromOffset(0, 360)
 	clear.root.Position = UDim2.fromOffset(148, 360)
@@ -474,6 +483,7 @@ function Workbench:addSticker(id: string)
 	table.insert(self.stickers, { id = id, a = 0, r = 0.82, rot = 0, size = 1, mirror = false })
 	self.selSticker = #self.stickers
 	self.dirty = true
+	self:setEditing(true)
 	self:redress()
 	self:refreshStickerUI()
 end
@@ -482,8 +492,9 @@ function Workbench:removeSticker()
 	local i = self.selSticker
 	if not i or not self.stickers[i] then return end
 	table.remove(self.stickers, i)
-	self.selSticker = if #self.stickers > 0 then math.min(i, #self.stickers) else nil
+	self.selSticker = nil
 	self.dirty = true
+	self:setEditing(false)
 	self:redress()
 	self:refreshStickerUI()
 end
@@ -497,79 +508,111 @@ function Workbench:redress()
 end
 
 --==============================================================
--- the sticker pad: over the bench in the sticker view, it outlines the picked sticker and lets
--- you grab any sticker and drag it round the wheel (scroll over the pad to size the picked one)
+-- the sticker pad: over the bench. In the sticker view it outlines the picked sticker and lets you
+-- grab any sticker and drag it round the wheel (scroll over the pad to size the picked one); out of
+-- it, a drag across the bay turns the tyre. Where a sticker is on screen is found by projecting its
+-- own plates through the bay's camera, and a drag is taken back through the camera onto the
+-- sidewall, so the pointer and the sticker always agree.
 --==============================================================
+local STAND_POS, STAND_SIZE = UDim2.fromOffset(26, 50), UDim2.fromOffset(324, 300)
+local BIG_POS, BIG_SIZE = UDim2.fromOffset(16, 50), UDim2.fromOffset(344, 506)
+
 function Workbench:buildStickerPad()
 	local root = self.stand.root
 	local pad = UI.mk("TextButton", {
 		Name = "StickerPad", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", AutoButtonColor = false,
-		Visible = false, ZIndex = (root.ZIndex or 6) + 8, Parent = root,
+		Visible = true, ZIndex = (root.ZIndex or 6) + 8, Parent = root,
 	})
 	self.pad = pad
 	-- the outline round the picked sticker, pulsing so it reads as the one you're moving
 	local ring = UI.mk("Frame", {
 		Name = "Outline", AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, Visible = false, ZIndex = pad.ZIndex + 1, Parent = pad,
-	}, { UI.corner(6) })
-	local stroke = UI.mk("UIStroke", { Color = C.orange, Thickness = 3, Transparency = 0, Parent = ring })
+	}, { UI.corner(4) })
+	local stroke = UI.mk("UIStroke", { Color = C.orange, Thickness = 2, Transparency = 0, Parent = ring })
 	local glow = UI.mk("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(1, 26, 1, 26), BackgroundTransparency = 1,
-		Image = Kit.Art.glow, ImageColor3 = C.orange, ImageTransparency = 0.55, ZIndex = pad.ZIndex, Parent = ring,
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(1, 10, 1, 10), BackgroundTransparency = 1,
+		Image = Kit.Art.glow, ImageColor3 = C.orange, ImageTransparency = 0.75, ZIndex = pad.ZIndex, Parent = ring,
 	})
 	self.outline, self.outlineStroke, self.outlineGlow = ring, stroke, glow
-	local hint = Kit.text("Drag a sticker to move it  ·  scroll to size it", 13, C.white, 2, Kit.Body)
+	local hint = Kit.text("", 13, C.white, 2, Kit.Body)
 	hint.AnchorPoint = Vector2.new(0.5, 1)
 	hint.Position = UDim2.new(0.5, 0, 1, -8)
 	hint.Size = UDim2.new(1, -16, 0, 16)
 	Kit.fit(hint, 13, 9)
 	hint.ZIndex = pad.ZIndex + 2
 	hint.Parent = pad
+	self.padHint = hint
 	RunService.RenderStepped:Connect(function()
+		if not self.root.Visible then return end
+		-- (kept on its sticker every frame: the camera glides in, the bay grows)
+		self:placeOutline()
 		if ring.Visible then
 			local k = 0.5 + 0.5 * math.sin(os.clock() * 6)
-			stroke.Transparency = 0.05 + 0.35 * k
-			stroke.Thickness = if self.dragging then 4 else 3
-			glow.ImageTransparency = 0.45 + 0.3 * k
+			stroke.Transparency = 0.05 + 0.3 * k
+			stroke.Thickness = if self.dragging then 3 else 2
+			glow.ImageTransparency = 0.7 + 0.2 * k
 		end
 	end)
 	local GuiService = game:GetService("GuiService")
 	local UIS = game:GetService("UserInputService")
-	-- a pointer position in the pad's own pixels from the hub (screen y down)
+	-- a pointer position in the pad's own pixels from its centre (screen y down). The mouse is read
+	-- where the screen has it, and a touch has the top bar added back, so both match the frames'
+	-- AbsolutePosition (the interface ignores the top bar's inset)
 	local function fromHub(io: InputObject): Vector2
-		local inset = GuiService:GetGuiInset()
-		local p = Vector2.new(io.Position.X, io.Position.Y) + inset
-		local centre = root.AbsolutePosition + root.AbsoluteSize / 2
-		return p - centre
+		local p: Vector2
+		if io.UserInputType == Enum.UserInputType.Touch then
+			p = Vector2.new(io.Position.X, io.Position.Y) + GuiService:GetGuiInset()
+		else
+			p = UIS:GetMouseLocation()
+		end
+		if not self.gui.IgnoreGuiInset then p -= GuiService:GetGuiInset() end
+		return p - (root.AbsolutePosition + root.AbsoluteSize / 2)
 	end
 	pad.InputBegan:Connect(function(io)
 		if io.UserInputType ~= Enum.UserInputType.MouseButton1 and io.UserInputType ~= Enum.UserInputType.Touch then return end
 		local d = fromHub(io)
-		-- the sticker under the pointer (the nearest centre within its size), picked and grabbed
-		local best, bestD = nil, math.huge
-		for i, s0 in ipairs(self.stickers) do
-			local c, w, h = self:stickerOnPad(s0)
-			local dist = (c - d).Magnitude
-			if dist < math.max(w, h) * 0.6 + 10 and dist < bestD then best, bestD = i, dist end
+		if self.tab == "stickers" then
+			-- the sticker under the pointer (the smallest that holds it), picked and grabbed
+			local best, bestArea = nil, math.huge
+			for i in ipairs(self.stickers) do
+				local box = self:stickerBox(i)
+				if box and box.holds(d, 6) and box.w * box.h < bestArea then best, bestArea = i, box.w * box.h end
+			end
+			if best then
+				local was = self.selSticker
+				self.selSticker = best
+				self:setEditing(true)
+				local box = self:stickerBox(best)
+				self.dragging = box ~= nil and self.stand.isEditing()
+				self.grabOff = if box then box.c - d else Vector2.zero
+				self.dragZ = box and box.z or 0
+				if was ~= best then self:refreshStickerUI() end
+				Kit.pop(ring, 1.08, 0.16)
+				return
+			end
 		end
-		if best then
-			self.selSticker = best
-			self.dragging = true
-			local c = self:stickerOnPad(self.stickers[best])
-			self.grabOff = c - d
-			self:refreshStickerUI()
-			Kit.pop(ring, 1.15, 0.18)
+		-- anywhere else: turn the tyre by hand (out of the sticker view)
+		if not self.stand.isEditing() then
+			self.turningX = d.X
 		end
 	end)
 	UIS.InputChanged:Connect(function(io)
-		if not self.dragging then return end
 		if io.UserInputType ~= Enum.UserInputType.MouseMovement and io.UserInputType ~= Enum.UserInputType.Touch then return end
+		if self.turningX then
+			local x = fromHub(io).X
+			self.stand.spin(x - self.turningX)
+			self.turningX = x
+			return
+		end
+		if not self.dragging then return end
 		local s0 = self.stickers[self.selSticker or 0]
-		if not s0 then return end
-		local d = fromHub(io) + (self.grabOff or Vector2.zero)
-		local px, radius = self.stand.editScale()
-		local out = d.Magnitude / math.max(px * radius, 1)
-		s0.a = math.deg(math.atan2(d.X, -d.Y))
-		s0.r = math.clamp(out, 0.6, 1.0)
+		local m = self.stand.model()
+		if not (s0 and m) then return end
+		local p = self:unproject(fromHub(io) + (self.grabOff or Vector2.zero), self.dragZ or 0)
+		if not p then return end
+		local radius = TyreSticker.surface(m)
+		s0.a = math.deg(math.atan2(p.X, p.Y))
+		s0.r = math.clamp(Vector2.new(p.X, p.Y).Magnitude / math.max(radius, 0.1), 0.6, 1.0)
 		self.setA(s0.a)
 		self.setR(s0.r)
 		self:redress()
@@ -577,46 +620,131 @@ function Workbench:buildStickerPad()
 	UIS.InputEnded:Connect(function(io)
 		if io.UserInputType == Enum.UserInputType.MouseButton1 or io.UserInputType == Enum.UserInputType.Touch then
 			self.dragging = false
+			self.turningX = nil
 		end
 	end)
 	pad.MouseWheelForward:Connect(function() self:nudgeSize(0.1) end)
 	pad.MouseWheelBackward:Connect(function() self:nudgeSize(-0.1) end)
+	self:paintHint()
 end
 
--- where a sticker sits on the pad (pixels from the hub) and its size there
-function Workbench:stickerOnPad(s0): (Vector2, number, number)
-	local px, radius = self.stand.editScale()
-	local a = math.rad(s0.a or 0)
-	local r = (s0.r or 0.82) * radius * px
-	local e = TyreSticker.catalogue().byId[s0.id]
-	local k = (s0.size or 1) * radius / 4 * px
-	local w = e and e.size.X * k or 30
-	local h = e and e.size.Y * k or 30
-	return Vector2.new(math.sin(a) * r, -math.cos(a) * r), w, h
+function Workbench:paintHint()
+	local h = self.padHint
+	if not h then return end
+	h.Text = if self.tab == "stickers" and self.stand.isEditing() then "Drag a sticker to move it  ·  scroll to size it"
+		elseif self.tab == "stickers" then "Click a sticker to edit it  ·  drag to turn the tyre"
+		else "Drag to turn it"
+end
+
+-- a point in the bay's world to pixels from the bay's centre (screen y down)
+function Workbench:project(p: Vector3): (Vector2, number)
+	local cam = self.stand.camera()
+	local size = self.stand.root.AbsoluteSize
+	local q = cam.CFrame:PointToObjectSpace(p)
+	local k = (size.Y / 2) / (math.max(0.05, -q.Z) * math.tan(math.rad(cam.FieldOfView / 2)))
+	return Vector2.new(q.X * k, -q.Y * k), -q.Z
+end
+
+-- pixels from the bay's centre back through the camera onto the plane z = zp of the tyre's own frame
+function Workbench:unproject(d: Vector2, zp: number): Vector3?
+	local m = self.stand.model()
+	if not m then return nil end
+	local cam = self.stand.camera()
+	local size = self.stand.root.AbsoluteSize
+	local t = math.tan(math.rad(cam.FieldOfView / 2))
+	local h2 = math.max(size.Y / 2, 1)
+	local dir = cam.CFrame:VectorToWorldSpace(Vector3.new(d.X / h2 * t, -d.Y / h2 * t, -1))
+	local pivot = m:GetPivot()
+	local o = pivot:PointToObjectSpace(cam.CFrame.Position)
+	local v = pivot:VectorToObjectSpace(dir)
+	if math.abs(v.Z) < 1e-4 then return nil end
+	local k = (zp - o.Z) / v.Z
+	if k <= 0 then return nil end
+	return o + v * k
+end
+
+-- where sticker i is on screen: its plates (this side) projected, boxed along the sticker's own
+-- axes as it appears. -> { c, w, h, rot, z, holds(d, margin) }
+function Workbench:stickerBox(i: number)
+	local m = self.stand.model()
+	if not m then return nil end
+	local pts, ups, zs = {}, Vector2.zero, 0
+	local n = 0
+	local pivot = m:GetPivot()
+	for _, c in ipairs(m:GetChildren()) do
+		if c:IsA("BasePart") and c.Name == "Sticker" and c:GetAttribute("StickerIndex") == i and c:GetAttribute("StickerSide") == 1 then
+			local hs = c.Size / 2
+			for sx = -1, 1, 2 do
+				for sy = -1, 1, 2 do
+					table.insert(pts, (self:project(c.CFrame:PointToWorldSpace(Vector3.new(hs.X * sx, hs.Y * sy, 0)))))
+				end
+			end
+			local a = self:project(c.Position)
+			local b = self:project(c.Position + c.CFrame.UpVector)
+			ups += b - a
+			zs += pivot:PointToObjectSpace(c.Position).Z
+			n += 1
+		end
+	end
+	if n == 0 then return nil end
+	-- the sticker's up on screen, as a clockwise turn from straight up
+	local rot = math.atan2(ups.X, -ups.Y)
+	local R = Vector2.new(math.cos(rot), math.sin(rot))
+	local Dn = Vector2.new(-math.sin(rot), math.cos(rot))
+	local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
+	for _, p in ipairs(pts) do
+		local x, y = p:Dot(R), p:Dot(Dn)
+		x0, x1, y0, y1 = math.min(x0, x), math.max(x1, x), math.min(y0, y), math.max(y1, y)
+	end
+	local c = R * (x0 + x1) / 2 + Dn * (y0 + y1) / 2
+	return {
+		c = c, w = x1 - x0, h = y1 - y0, rot = math.deg(rot), z = zs / n,
+		holds = function(d: Vector2, margin: number): boolean
+			local x, y = d:Dot(R), d:Dot(Dn)
+			return x >= x0 - margin and x <= x1 + margin and y >= y0 - margin and y <= y1 + margin
+		end,
+	}
 end
 
 function Workbench:nudgeSize(by: number)
 	local s0 = self.stickers[self.selSticker or 0]
-	if not s0 then return end
+	if not s0 or not self.stand.isEditing() then return end
 	s0.size = math.clamp((s0.size or 1) + by, 0.3, 2.5)
 	self.setSize(s0.size)
 	self:redress()
 end
 
--- the outline over the picked sticker
+-- the outline over the picked sticker (only in the sticker view)
 function Workbench:placeOutline()
 	local ring = self.outline
 	if not ring then return end
-	local s0 = self.stickers[self.selSticker or 0]
-	if not (s0 and self.tab == "stickers") then
+	local box = self.tab == "stickers" and self.stand.isEditing() and self.selSticker and self:stickerBox(self.selSticker) or nil
+	if not box then
 		ring.Visible = false
 		return
 	end
-	local c, w, h = self:stickerOnPad(s0)
 	ring.Visible = true
-	ring.Position = UDim2.new(0.5, c.X, 0.5, c.Y)
-	ring.Size = UDim2.fromOffset(w + 8, h + 8)
-	ring.Rotation = s0.rot or 0
+	ring.Position = UDim2.new(0.5, box.c.X, 0.5, box.c.Y)
+	ring.Size = UDim2.fromOffset(box.w + 6, box.h + 6)
+	ring.Rotation = box.rot
+end
+
+-- the bay grows to fill the left of the bench for the stickers (the tyre comes forward, the centre
+-- of it all), and goes back for the tyres
+function Workbench:layoutStand(big: boolean)
+	if self.big == big then return end
+	self.big = big
+	for _, g in ipairs({ self.dName, self.dPlate, self.favBtn.root, self.dInfo } :: { GuiObject }) do g.Visible = not big end
+	Kit.tween(self.stand.root, 0.4, { Position = if big then BIG_POS else STAND_POS, Size = if big then BIG_SIZE else STAND_SIZE }, Enum.EasingStyle.Back)
+end
+
+-- the sticker view (face-on, close) on or off; out of it the tyre turns and can be turned by hand
+function Workbench:setEditing(on: boolean)
+	local size = if self.big then BIG_SIZE else STAND_SIZE
+	self.stand.setEdit(on, size.X.Offset / size.Y.Offset)
+	if not on then self.dragging = false end
+	self:placeOutline()
+	self:paintHint()
 end
 
 -- the chips and sliders for the sticker picked
@@ -638,6 +766,7 @@ function Workbench:refreshStickerUI()
 		end
 		b.Activated:Connect(function()
 			self.selSticker = i
+			self:setEditing(true)
 			self:refreshStickerUI()
 		end)
 	end
@@ -710,7 +839,8 @@ function Workbench:select(uid: number)
 	local design = v.designs and v.designs[tostring(uid)]
 	self.stickers = {}
 	for _, s in ipairs(design and design.stickers or {}) do table.insert(self.stickers, table.clone(s)) end
-	self.selSticker = if #self.stickers > 0 then 1 else nil
+	self.selSticker = nil
+	if self.tab == "stickers" then self:setEditing(false) end
 	local m = self.stand.model()
 	if m then TyreSticker.apply(m, self.stickers) end
 	self.dirty = false
@@ -742,9 +872,9 @@ function Workbench:setTab(name: string)
 	self.tab = name
 	for k, b in pairs(self.tabBtns) do b.setColor(if k == name then C.orange else C.grey) end
 	for k, page in pairs(self.pages) do page.Visible = k == name end
-	-- the sticker view closes in on the sidewall; the tyres page shows it turning on its stand
-	self.stand.setEdit(name == "stickers")
-	if self.pad then self.pad.Visible = name == "stickers" end
+	-- the stickers bring the tyre forward, big; a sticker picked closes in on the sidewall
+	self:layoutStand(name == "stickers")
+	self:setEditing(name == "stickers" and self.selSticker ~= nil)
 	if name == "stickers" then
 		self:renderCatalogue()
 		self:refreshStickerUI()
