@@ -307,21 +307,37 @@ function Game.rollMutation(r: number, luck: number?, event: string?): string?
 	return nil
 end
 
+-- a tyre from a dearer crate is worth more at every rarity: a Highway tyre x2 a Backroad one, a
+-- Dunes tyre x4 (so a Dunes Common beats a Backroad Epic), and a few more stat points. Mythics and
+-- Secrets (any crate) count as the top zone.
+Game.ZonePower = {
+	backroad = { mult = 1, pts = 0 },
+	highway = { mult = 2, pts = 1.5 },
+	dunes = { mult = 4, pts = 3 },
+	mythic = { mult = 4, pts = 3 },
+	secret = { mult = 4, pts = 3 },
+	retired = { mult = 1, pts = 0 },
+}
+function Game.zonePower(id: string): { mult: number, pts: number }
+	local t = Game.TyresById[id]
+	return (t and Game.ZonePower[t.zone]) or Game.ZonePower.backroad
+end
+
 function Game.tyreMult(id: string, forge: number?, mut: string?): number
 	local t = Game.TyresById[id]
 	if not t then return 1 end
-	local base = Game.RaritiesById[t.rarity].mult
+	local base = Game.RaritiesById[t.rarity].mult * Game.zonePower(id).mult
 	local m = base * (1 + Game.Forge.StarShare * (forge or 0))
 	local mu = mut and Game.MutationsById[mut]
 	if mu then m *= mu.mult end
 	return m
 end
 
--- a tyre's points for the stats: its rarity's place plus its stars
+-- a tyre's points for the stats: its rarity's place plus its stars, plus its crate's zone bonus
 function Game.statPoints(id: string, forge: number?): number
 	local t = Game.TyresById[id]
 	if not t then return 0 end
-	return Game.RaritiesById[t.rarity].order + (forge or 0)
+	return Game.RaritiesById[t.rarity].order + (forge or 0) + Game.zonePower(id).pts
 end
 
 -- for the screens that sort by strength: the cash multiplier first, the stat points to break ties

@@ -78,8 +78,8 @@ end
 -- each crate's look: its colour, its picture (a Blender render per crate) and a line about it
 local ZONE_LOOK = {
 	backroad = { color = Color3.fromRGB(150, 205, 60), icon = Kit.Icon.crate_backroad or Kit.Icon.crate, sub = "The everyday crate. Plain tyres, and a Legendary if you're lucky." },
-	highway = { color = Color3.fromRGB(255, 128, 40), icon = Kit.Icon.crate_highway or Kit.Icon.crate, sub = "Road-case crate: better odds on Rare and Epic." },
-	dunes = { color = Color3.fromRGB(176, 112, 240), icon = Kit.Icon.crate_dunes or Kit.Icon.crate, sub = "The treasure chest. The best odds, Mythics included." },
+	highway = { color = Color3.fromRGB(255, 128, 40), icon = Kit.Icon.crate_highway or Kit.Icon.crate, sub = "Every tyre in it pays x2 a Backroad one: even a Common beats a Backroad Rare." },
+	dunes = { color = Color3.fromRGB(176, 112, 240), icon = Kit.Icon.crate_dunes or Kit.Icon.crate, sub = "Every tyre in it pays x4 a Backroad one: even a Common beats a Backroad Epic." },
 }
 
 local function clock(sec: number): string

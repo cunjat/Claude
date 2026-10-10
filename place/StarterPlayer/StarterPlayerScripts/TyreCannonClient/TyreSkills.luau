@@ -138,8 +138,15 @@ function TyreSkills.new(sim, stats, gui: Instance?)
 		})
 		self.turbo = 0
 	end
-	if gui and self.skill then self:buildCard(gui) end
+	-- (the HUD draws the skill now, in its ability bar: HudUI reads it from the run's tick)
+	local _ = gui
 	return self
+end
+
+-- something the skill does is running right now (the HUD lights the skill's key)
+function TyreSkills:isActive(): boolean
+	return self.wingsT ~= nil or self.dashT ~= nil or self.sandy ~= nil or self.zeroT ~= nil or self.mineT ~= nil
+		or self.inhaleT ~= nil or self.puffT ~= nil or self.pounding == true or (self.turboTier or 0) > 0
 end
 
 --==============================================================
@@ -396,7 +403,8 @@ function TyreSkills:landed(impact: number): number?
 		VFX.emit("LandCrack", CFrame.new(pos + Vector3.new(0, 0.3, 0)), { scale = 3 })
 		PackFX.burst("dustRing", CFrame.new(pos), 34, sim.track:cfgAt(sim.x).ground:Lerp(Color3.new(1, 1, 1), 0.3), 3.2)
 		sim.shake = 3
-		sim.vx += 90
+		-- (speed, not vx: this runs inside the step, before the velocity is written)
+		sim.speed += 90
 		Sound.play("land", { volume = 1, pitch = 0.7 })
 		if n > 0 then sim.onEvent({ kind = "smash", total = sim.smashes }) end
 		return 52   -- the nose angle it throws you off at, in degrees

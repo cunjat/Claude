@@ -813,9 +813,37 @@ function RunSim:onLanding(land)
 	local hang = self.airStreak
 	local at = Vector3.new(self.x, self.y - R + 0.4, self.z)
 	local dustCol = self.track:cfgAt(self.x).ground:Lerp(Color3.new(1, 1, 1), 0.3)
-	if self.cam then RunCamera.thump(self.cam, math.min(impact, 400) * 0.1) end
+	if self.cam then RunCamera.thump(self.cam, math.min(impact, 400) * (if land.braced then 0.05 else 0.1)) end
+	local pounding = self.skills.pounding == true
+	if land.soft and land.braced and impact >= F.SoftImpact * 0.6 and not pounding then
+		-- a timed tuck took a landing that would have hurt: it rolls on, and it's a link
+		PackFX.burst("dustRing", CFrame.new(at), 10, dustCol, 1.1)
+		self.perfects += 1
+		self.nitro = math.min(self.nitroMax, self.nitro + F.LandNitro)
+		self:link()
+		self.hitStopUntil = os.clock() + 0.03
+		Sound.play("land", { volume = 0.45, pitch = 1.15 })
+		self.onEvent({ kind = "braced", chain = self.chain, combo = self.combo })
+		local skillPitch = self.skills:landed(impact)
+		if skillPitch then
+			self.grounded = false
+			self.pitch = math.clamp(math.rad(skillPitch), 0.3, 1.0)
+			self.speed += 40
+		end
+		return
+	end
 	if land.soft then
 		PackFX.burst("dustRing", CFrame.new(at), 6, dustCol, 0.9)
+		if pounding then
+			-- Meteor comes down braced: the slam is the point, never a crash
+			local skillPitch = self.skills:landed(impact)
+			if skillPitch then
+				self.grounded = false
+				self.pitch = math.clamp(math.rad(skillPitch), 0.3, 1.0)
+				self.speed += 40
+			end
+			return
+		end
 		if hang > F.SmoothHang and impact < F.SoftImpact * 0.5 then
 			self.perfects += 1
 			self.nitro = math.min(self.nitroMax, self.nitro + F.LandNitro)
@@ -827,10 +855,10 @@ function RunSim:onLanding(land)
 	end
 	self.squash = math.max(self.squash or 0, math.clamp(impact / 380, 0.25, 1))
 	self.shake = math.min(2.6, self.shake + impact * 0.004)
-	if land.bounced then
+	if land.bounced and not pounding then
 		self.skids += 1
 		if self.chain > 0 then self:breakChain("crash") end
-	elseif self.chain > 0 and impact > F.HardImpact * 0.7 then
+	elseif self.chain > 0 and impact > F.HardImpact * 0.7 and not pounding then
 		self:breakChain("ground")
 	end
 	if impact > 90 then
@@ -847,8 +875,10 @@ function RunSim:onLanding(land)
 		self.grounded = false
 		self.pitch = math.clamp(math.rad(skillPitch), 0.3, 1.0)
 		self.speed += 40
+		return
 	end
-	self.onEvent({ kind = "crash", impact = impact })
+	-- a bounce off the ground is a crash; anything less is only rough
+	self.onEvent({ kind = if land.bounced then "crash" else "rough", impact = impact })
 end
 
 -- the target the tyre has come down onto this step, or nil: its top, from above
@@ -945,6 +975,9 @@ function RunSim:step(dt: number)
 	local px, py = self.x, self.y
 	local inp = self.input
 	inp.aimYaw, inp.aimPitch, inp.tuck, inp.thrust = self.aimYaw, self.aimPitch, tuck, thrust + mods.thrust
+	-- braced for the landing: tucked as it touches down, or a skill's slam (Meteor)
+	inp.brace = tuck or (sk.pounding == true)
+	inp.slam = sk.pounding == true
 	local res = RunPhysics.step(self, inp, ctx, self.terrain, F, dt)
 	if res.landing then self:onLanding(res.landing) end
 	local s = self.speed
@@ -1186,7 +1219,6 @@ function RunSim:step(dt: number)
 		self.stopTimer = 0
 	end
 	if self.runTime > Config.Economy.MaxRunSeconds then self:finish("timeout") end
-	self.skills:step(dt)
 
 	-- the velocity the skills see, and a guard against a NaN freezing the run for good
 	local cp3 = math.cos(self.pitch)
@@ -1209,6 +1241,9 @@ function RunSim:step(dt: number)
 		self.lastGoodX = self.x
 	end
 	self.wvx, self.wvy, self.wvz = self.vx, self.vy, self.vz
+	-- the skills run after the velocity is set: whatever they add to it (Mini-Turbo, Drill Dash) is
+	-- picked up at the top of the next step instead of being written over
+	self.skills:step(dt)
 end
 
 --==============================================================
@@ -1365,8 +1400,42 @@ function RunSim:frame(dt: number)
 	fov += self.gateLean * 8 + (self.skills and self.skills.fovAdd or 0)
 	self.camera.FieldOfView += (fov - self.camera.FieldOfView) * math.min(1, dt * 6)
 
+	-- the tuck cue: when a tuck now pays. On the ground, the road about to drop away (a PERFECT
+	-- tuck); in the air, about to touch down hard enough to hurt (tuck to brace)
+	local cue: string? = nil
+	local tuckFree = not self.tucking and (self.tuckCd or 0) <= 0
+	if self.grounded then
+		local here = self.track:slopeAt(self.x)
+		local ahead = self.track:slopeAt(self.x + math.cos(self.yaw) * F.PerfectLook)
+		local further = self.track:slopeAt(self.x + math.cos(self.yaw) * F.PerfectLook * 2.2)
+		if here > F.PerfectFlat and ahead < F.PerfectDrop then
+			cue = if tuckFree then "perfect" elseif self.tucking then "tucked" else nil
+		elseif here > F.PerfectFlat and further < F.PerfectDrop and self.speed > 60 then
+			cue = "soon"
+		end
+	else
+		local vyNow = math.sin(self.pitch) * self.speed
+		local hsNow = math.cos(self.pitch) * self.speed
+		if vyNow < -5 and alt < 400 then
+			local t = alt / -vyNow
+			local tp = math.atan(self.track:slopeAt(self.x + hsNow * t))
+			local impact = math.max(0, hsNow * math.sin(tp) - vyNow * math.cos(tp))
+			if t < (F.BraceCue or 0.55) and impact > F.SoftImpact * 0.9 then
+				cue = if self.tucking then "braced" elseif tuckFree then "land" else "late"
+			end
+		end
+	end
+	self.tuckCue = cue
+
 	if self.onTick then
+		local sk = self.skills
+		local skCd = (sk and sk.skill and (sk.skill.cooldown or 0) > 0) and math.clamp(sk.cooldown / sk.skill.cooldown, 0, 1) or 0
 		self.onTick({
+			tuckCue = cue, tucking = self.tucking == true,
+			skillName = sk and sk.skill and sk.skill.name or nil, skillKey = sk and sk.skill and sk.skill.key or nil,
+			skillCd = skCd, skillLeft = sk and sk.cooldown or 0, skillActive = sk and sk:isActive() or false,
+			skillCharge = sk and sk.turboTier or 0,
+			floating = (self.aimPitch or 0) > 0.15 and not self.grounded, diving = (self.aimPitch or 0) < -0.15 and not self.grounded,
 			x = self.x, y = self.y, z = self.z, roll = self.roll,
 			trackId = self.trackId, seed = self.track.runSeed,
 			speed = self.speed, distance = self.x, metres = self.x * P.StudsToMetres,

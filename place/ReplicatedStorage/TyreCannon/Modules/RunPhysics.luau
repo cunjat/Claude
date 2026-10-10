@@ -10,7 +10,9 @@
 --                  nose down (dive) falls faster.
 --   LANDING        the velocity splits along the slope and into it. What's along it is kept, so a
 --                  landing that matches the slope loses nothing; what's into it is the impact: soft
---                  rolls on, middling scrubs speed, hard kicks it back up.
+--                  rolls on, middling scrubs speed, hard kicks it back up. Braced (tucked as it touches
+--                  down, or a skill's slam) it takes far more before it scrubs or kicks: a landing you
+--                  time is never a crash.
 
 local RunPhysics = {}
 
@@ -27,6 +29,8 @@ export type Input = {
 	aimPitch: number,     -- air only: + flare, - dive (about -0.6..0.6)
 	tuck: boolean,
 	thrust: number,       -- studs/s^2 along the path this step (nitro and quirks)
+	brace: boolean?,      -- braced for the landing (tucked as it touches down)
+	slam: boolean?,       -- a skill's slam (Meteor): it comes down keeping all its speed
 }
 
 -- everything the stats, quirks and skills change, folded into plain multipliers by the caller
@@ -37,7 +41,7 @@ export type Ctx = {
 	maxSpeed: number, fatigue: number,
 }
 
-export type Landing = { impact: number, soft: boolean, bounced: boolean, tp: number }
+export type Landing = { impact: number, soft: boolean, bounced: boolean, tp: number, braced: boolean }
 
 export type Result = { tookOff: boolean, landing: Landing? }
 
@@ -146,7 +150,10 @@ function RunPhysics.step(st: State, inp: Input, c: Ctx, T: Terrain, F: any, dt: 
 	local vt = math.max(hs * math.cos(tp) + vy * math.sin(tp), 0)
 	local vn = -hs * math.sin(tp) + vy * math.cos(tp)
 	local impact = math.max(0, -vn)
-	local land: Landing = { impact = impact, soft = impact < F.SoftImpact, bounced = false, tp = tp }
+	local braced = inp.brace == true
+	local softAt = if inp.slam then math.huge else F.SoftImpact * (if braced then (F.BraceSoft or 1) else 1)
+	local hardAt = F.HardImpact * (if braced then (F.BraceHard or 1) else 1)
+	local land: Landing = { impact = impact, soft = impact < softAt, bounced = false, tp = tp, braced = braced }
 	res.landing = land
 	if land.soft then
 		st.grounded = true
@@ -154,9 +161,9 @@ function RunPhysics.step(st: State, inp: Input, c: Ctx, T: Terrain, F: any, dt: 
 		st.speed = vt
 		return res
 	end
-	local sev = math.clamp((impact - F.SoftImpact) / 260, 0, 1)
+	local sev = math.clamp((impact - softAt) / 260, 0, 1)
 	vt *= (1 - sev * (1 - F.HardKeep)) * math.min(1.06, c.keep ^ 0.4)
-	if impact > F.HardImpact then
+	if impact > hardAt then
 		local up = impact * c.restitution * c.glide ^ 0.3
 		local nhs = vt * math.cos(tp) - up * math.sin(tp)
 		local nvy = vt * math.sin(tp) + up * math.cos(tp)

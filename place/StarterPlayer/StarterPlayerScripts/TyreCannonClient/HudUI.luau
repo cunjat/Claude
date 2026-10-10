@@ -245,19 +245,57 @@ function HudUI.new(parent: ScreenGui)
 	self.nitroKey.Size = UDim2.fromOffset(100, 18)
 	self.nitroKey.ZIndex = 6
 	self.nitroKey.Parent = nitro
-	-- the tuck: a slim bar sitting right on the nitro, the same width, labelled on its left
-	local ttrack, tfill = Kit.bar(380, 12, C.teal)
-	ttrack.AnchorPoint = Vector2.new(0.5, 1)
-	ttrack.Position = UDim2.new(0.5, 0, 1, -38)
-	ttrack.Parent = bc
-	self.tuckFill = tfill
-	self.tuckTrack = ttrack
-	local tkey = Kit.text(touchOnly and "TUCK" or "TUCK  ·  SHIFT", 11, C.muted, 1.5, Kit.Body)
-	tkey.AnchorPoint = Vector2.new(0, 1)
-	tkey.TextXAlignment = Enum.TextXAlignment.Left
-	tkey.Position = UDim2.new(0.5, -186, 1, -52)
-	tkey.Size = UDim2.fromOffset(140, 14)
-	tkey.Parent = bc
+	-- the moves: a key tile each above the nitro (TUCK, FLOAT, DIVE, and the tyre's skill), lit
+	-- while it's working, filled while it's cooling, and the TUCK tile lights gold when a tuck now
+	-- pays (the road dropping away, or a hard landing coming)
+	local moves = corner(root, Vector2.new(0.5, 1), UDim2.new(0.5, 0, 1, -66), Vector2.new(460, 64))
+	slide(moves, UDim2.fromOffset(0, 160))
+	self.moves = moves
+	self.moveTiles = {}
+	local function tile(id: string, label: string, key: string, color: Color3, x: number, w: number)
+		local t = UI.mk("Frame", { Name = id, Position = UDim2.fromOffset(x, 4), Size = UDim2.fromOffset(w, 56), BackgroundTransparency = 1, Parent = moves })
+		local face = Kit.slice("tile", Color3.fromRGB(70, 72, 80), t, 2, 0.32)
+		local glow = UI.mk("ImageLabel", {
+			Position = UDim2.fromOffset(4, 4), Size = UDim2.new(1, -8, 1, -8), BackgroundTransparency = 1, Image = Kit.Art.glow,
+			ImageColor3 = color, ImageTransparency = 1, ZIndex = 3, Parent = t,
+		}, { UI.corner(8) })
+		-- the cooldown: a dark sheet over the tile that shrinks as it comes back
+		local cool = UI.mk("Frame", {
+			AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 4, 1, -4), Size = UDim2.new(1, -8, 0, 0), BackgroundColor3 = Color3.new(0, 0, 0),
+			BackgroundTransparency = 0.35, BorderSizePixel = 0, ZIndex = 6, Parent = t,
+		}, { UI.corner(8) })
+		local cap = Kit.text(key, 13, C.white, 1.5, Kit.Body)
+		cap.AnchorPoint = Vector2.new(0.5, 0)
+		cap.Position = UDim2.new(0.5, 0, 0, 6)
+		cap.Size = UDim2.new(1, -10, 0, 16)
+		Kit.fit(cap, 13, 8)
+		cap.TextColor3 = C.muted
+		cap.ZIndex = 7
+		cap.Parent = t
+		local name = Kit.text(label, 17, C.white, 2, ITALIC)
+		name.AnchorPoint = Vector2.new(0.5, 1)
+		name.Position = UDim2.new(0.5, 0, 1, -6)
+		name.Size = UDim2.new(1, -10, 0, 22)
+		Kit.fit(name, 17, 9)
+		name.ZIndex = 7
+		name.Parent = t
+		local rec = { root = t, face = face, glow = glow, cool = cool, cap = cap, name = name, color = color, lit = false }
+		self.moveTiles[id] = rec
+		return rec
+	end
+	tile("tuck", "TUCK", touchOnly and "" or "SHIFT", C.teal, 0, 100)
+	tile("float", "FLOAT", touchOnly and "" or "W", C.blue, 108, 84)
+	tile("dive", "DIVE", touchOnly and "" or "S", C.orange, 200, 84)
+	tile("skill", "SKILL", touchOnly and "" or "E", PERFECT, 292, 168)
+	self.moveTiles.skill.root.Visible = false
+	-- the big word when a tuck now pays
+	self.tuckCall = Kit.text("", 40, PERFECT, 3.5, ITALIC)
+	self.tuckCall.AnchorPoint = Vector2.new(0.5, 0.5)
+	self.tuckCall.Position = UDim2.new(0.5, 0, 0.64, 0)
+	self.tuckCall.Size = UDim2.fromOffset(520, 48)
+	self.tuckCall.TextTransparency = 1
+	self.tuckCall.ZIndex = 25
+	self.tuckCall.Parent = root
 
 	---------------------------------------------------------------
 	-- over the world: where you're heading
@@ -294,7 +332,7 @@ function HudUI.new(parent: ScreenGui)
 
 	self.warn = Kit.text("", 26, C.red, 2.5)
 	self.warn.AnchorPoint = Vector2.new(0.5, 1)
-	self.warn.Position = UDim2.new(0.5, 0, 1, -98)
+	self.warn.Position = UDim2.new(0.5, 0, 1, -150)
 	self.warn.Size = UDim2.fromOffset(520, 32)
 	self.warn.Visible = false
 	self.warn.Parent = root
@@ -405,7 +443,7 @@ function HudUI:update(s)
 		self.beaten = true
 		self.bestLabel.Text = "NEW RECORD"
 		self.bestLabel.TextColor3 = C.green
-		self:stamp("NEW RECORD", C.green, 40, -4)
+		self:stamp("NEW RECORD", C.green, 40, 0)
 	elseif s.ghostX and not self.beaten then
 		local gap = (s.distance - s.ghostX) * M
 		if math.abs(gap) < 5 then
@@ -434,10 +472,8 @@ function HudUI:update(s)
 	self.speedFill.Size = UDim2.fromScale(math.max(0.04, self.speedShown), 1)
 	self.speedFill.BackgroundColor3 = C.accent:Lerp(Color3.fromRGB(255, 80, 60), math.clamp((self.speedShown - 0.6) / 0.4, 0, 1))
 
-	-- nitro
-	local tf = math.clamp(s.tuckFrac or 1, 0, 1)
-	self.tuckFill.Size = UDim2.fromScale(math.max(0.02, tf), 1)
-	self.tuckFill.BackgroundColor3 = if s.tuckCool then C.red else C.teal
+	-- the moves
+	self:updateMoves(s, now)
 	local nf = math.clamp(s.nitroFrac or 0, 0, 1)
 	self.nitroFill.Size = UDim2.fromScale(math.max(0.02, nf), 1)
 	local low = nf < 0.15
@@ -481,6 +517,95 @@ function HudUI:update(s)
 		self.hint.TextTransparency = math.min(1, self.hint.TextTransparency + 0.02)
 		local st = self.hint:FindFirstChildOfClass("UIStroke")
 		if st then st.Transparency = math.max(st.Transparency, self.hint.TextTransparency) end
+	end
+end
+
+--==============================================================
+-- the moves
+--==============================================================
+local function lightTile(t, on: boolean, color: Color3?)
+	local col = color or t.color
+	if on ~= t.lit or (on and t.litCol ~= col) then
+		t.lit = on
+		t.litCol = col
+		t.face.ImageColor3 = if on then col else Color3.fromRGB(70, 72, 80)
+		t.glow.ImageColor3 = col
+		t.glow.ImageTransparency = if on then 0.2 else 1
+		t.cap.TextColor3 = if on then C.white else C.muted
+		if on then Kit.pop(t.root, 0.85, 0.2) end
+	end
+end
+
+function HudUI:updateMoves(s, now: number)
+	local T = self.moveTiles
+	-- TUCK: its window while held, red while cramped, gold when a tuck now pays
+	local tk = T.tuck
+	local cue = s.tuckCue
+	local tf = math.clamp(s.tuckFrac or 1, 0, 1)
+	local used = if s.tuckCool then 1 elseif s.tucking then 1 - tf else 0
+	tk.cool.Size = UDim2.new(1, -8, used, -8 * used)
+	tk.cool.BackgroundColor3 = if s.tuckCool then Color3.fromRGB(120, 20, 20) else Color3.new(0, 0, 0)
+	local pulse = 0.5 + 0.5 * math.sin(now * 14)
+	if cue == "perfect" or cue == "land" then
+		lightTile(tk, true, PERFECT)
+		tk.glow.ImageTransparency = 0.05 + 0.3 * pulse
+		tk.name.Text = "TUCK!"
+	elseif cue == "soon" then
+		lightTile(tk, false)
+		tk.face.ImageColor3 = Color3.fromRGB(70, 72, 80):Lerp(PERFECT, 0.35 + 0.25 * pulse)
+		tk.name.Text = "TUCK"
+	elseif s.tucking or cue == "braced" or cue == "tucked" then
+		lightTile(tk, true, GOOD)
+		tk.name.Text = if cue == "braced" then "BRACED" else "TUCK"
+	else
+		lightTile(tk, false)
+		tk.name.Text = if s.tuckCool then "CRAMP" else "TUCK"
+	end
+	-- the big word
+	local call = self.tuckCall
+	local want = if cue == "perfect" then "TUCK!" elseif cue == "land" then "TUCK TO LAND!" else ""
+	if want ~= "" then
+		if call.Text ~= want then
+			call.Text = want
+			Kit.pop(call, 0.6, 0.18)
+		end
+		call.TextColor3 = PERFECT
+		call.TextTransparency = 0.05 + 0.25 * pulse
+	elseif call.TextTransparency < 1 then
+		call.TextTransparency = math.min(1, call.TextTransparency + 0.12)
+	end
+	local cst = call:FindFirstChildOfClass("UIStroke")
+	if cst then cst.Transparency = call.TextTransparency end
+	-- FLOAT and DIVE: lit while you hold them in the air
+	lightTile(T.float, s.floating == true)
+	lightTile(T.dive, s.diving == true)
+	-- the skill: its name, its cooldown sheet and seconds, lit while it runs
+	local sk = T.skill
+	if s.skillName then
+		if not sk.root.Visible then
+			sk.root.Visible = true
+			sk.cap.Text = if s.skillKey and sk.cap.Text ~= "" then s.skillKey else sk.cap.Text
+		end
+		local cd = math.clamp(s.skillCd or 0, 0, 1)
+		sk.cool.Size = UDim2.new(1, -8, cd, -8 * cd)
+		local ready = cd <= 0
+		if ready and self.skillWasCooling then
+			self.skillWasCooling = false
+			Kit.pop(sk.root, 1.25, 0.25)
+		elseif not ready then
+			self.skillWasCooling = true
+		end
+		local charge = s.skillCharge or 0
+		if charge > 0 then
+			local turbo = { Color3.fromRGB(70, 150, 255), Color3.fromRGB(255, 150, 40), Color3.fromRGB(190, 90, 255) }
+			lightTile(sk, true, turbo[math.clamp(charge, 1, 3)])
+		else
+			lightTile(sk, s.skillActive == true)
+		end
+		sk.name.Text = if ready then string.upper(s.skillName) else ("%s  %ds"):format(string.upper(s.skillName), math.ceil(s.skillLeft or 0))
+		sk.name.TextTransparency = if ready then 0 else 0.25
+	else
+		sk.root.Visible = false
 	end
 end
 
@@ -567,29 +692,35 @@ function HudUI:event(e)
 		self:setChain(e.chain, e.combo)
 		self.multScale.Scale = 1.3
 		Kit.tween(self.multScale, 0.22, { Scale = 1 }, Enum.EasingStyle.Back)
-		self:stamp(e.perfect and "DIVE BOMB" or "BOUNCE", e.perfect and PERFECT or GOOD, e.perfect and 46 or 36, math.random(-4, 3), ("x%s"):format(Game.multText(e.combo)))
+		self:stamp(e.perfect and "DIVE BOMB" or "BOUNCE", e.perfect and PERFECT or GOOD, e.perfect and 46 or 36, 0, ("x%s"):format(Game.multText(e.combo)))
 	elseif k == "tuck" then
 		if e.what == "perfect" then
 			self.shownChain = e.chain
 			self:setChain(e.chain, e.combo)
-			self:stamp("PERFECT TUCK", PERFECT, 44, math.random(-4, 3), ("x%s"):format(Game.multText(e.combo)))
+			self:stamp("PERFECT TUCK", PERFECT, 44, 0, ("x%s"):format(Game.multText(e.combo)))
 		elseif e.what == "cramp" then
 			self:toast("CRAMP", C.muted, 22)
 		end
 	elseif k == "smooth" then
 		self.shownChain = e.chain
 		self:setChain(e.chain, e.combo)
-		self:stamp("SMOOTH LANDING", PERFECT, 40, math.random(-4, 3), ("x%s"):format(Game.multText(e.combo)))
+		self:stamp("SMOOTH LANDING", PERFECT, 40, 0, ("x%s"):format(Game.multText(e.combo)))
 	elseif k == "skim" then
 		self.shownChain = e.chain
 		self:setChain(e.chain, e.combo)
 		self:toast("SKIM  +NITRO", C.teal, 24)
 	elseif k == "chainlost" then
-		self:stamp("CHAIN LOST", C.muted, 32, 2, ("%d in a row"):format(e.chain or 0))
+		self:stamp("CHAIN LOST", C.muted, 32, 0, ("%d in a row"):format(e.chain or 0))
 		self:setChain(0, 1)
 		self.shownChain = 0
+	elseif k == "braced" then
+		self.shownChain = e.chain
+		self:setChain(e.chain, e.combo)
+		self:stamp("CLEAN LANDING", GOOD, 38, 0, ("x%s"):format(Game.multText(e.combo)))
+	elseif k == "rough" then
+		self:toast("ROUGH LANDING  ·  TUCK TO BRACE", C.muted, 22)
 	elseif k == "crash" then
-		if (e.impact or 0) > 120 then self:toast("CRASH", C.red, 30) end
+		self:toast("CRASH", C.red, 30)
 	elseif k == "hit" then
 		self:toast("CLIPPED", C.red, 26)
 	elseif k == "view" then
@@ -605,9 +736,9 @@ function HudUI:event(e)
 	elseif k == "checkpoint" then
 		self:gateBanner(e.tier, e.metres, e.split, e.bestSplit, e.zoneName)
 	elseif k == "skill" then
-		self:stamp(string.upper(e.name), Color3.fromRGB(255, 196, 64), 40, -2)
+		self:stamp(string.upper(e.name), Color3.fromRGB(255, 196, 64), 40, 0)
 	elseif k == "key" then
-		self:stamp("+1 KEY", Color3.fromRGB(255, 200, 52), 46, 3)
+		self:stamp("+1 KEY", Color3.fromRGB(255, 200, 52), 46, 0)
 	end
 end
 
