@@ -58,6 +58,7 @@ local HubExtras = require(script.Parent.HubExtras)
 local LaunchArcs = require(script.Parent.LaunchArcs)
 local Rivals = require(script.Parent.Rivals)
 local WheelView = require(script.Parent.WheelView)
+local CannonWorker = require(script.Parent.CannonWorker)
 local T = UI.Theme
 
 --==============================================================
@@ -86,6 +87,8 @@ Prefs.onError = function(msg) hub:toast(msg, T.bad) end
 -- the revamped loop's screens
 local V2 = Remotes:WaitForChild("V2", 30)
 local plot2 = Plot2.new(gui, V2)
+-- every yard's worker: out of the garage to fire its cannon
+local cannonWorker = CannonWorker.new(plot2)
 local yardLife = YardLife.new(plot2)
 -- every yard dressed for its owner's tier
 local plotStage = PlotStage.new()
@@ -397,6 +400,8 @@ startRun = function(_trackId: string?, auto: boolean?, _startX: number?)
 		char:PivotTo(home.CFrame * CFrame.new(0, 3.2, 0))
 	end
 
+	-- your yard's worker walks out to the cannon for the launch
+	pcall(function() cannonWorker:attend(myPlot :: Instance) end)
 	-- at the cannon: the camera comes round, the tyre goes in, the dial decides the shot
 	local cannon = plot2:cannonOf(myPlot)
 	local launchId = nil
@@ -431,6 +436,8 @@ startRun = function(_trackId: string?, auto: boolean?, _startX: number?)
 		show:destroy()
 		show = nil
 	end
+	-- the shot's away: the worker goes back in
+	if myPlot then pcall(function() cannonWorker:dismiss(myPlot :: Instance) end) end
 
 	state = "run"
 	setStatus("attempt")
@@ -567,6 +574,7 @@ hubX = HubExtras.new(gui, V2, {
 	end,
 })
 if profile then hubX:setProfile(profile) end
+LaunchArcs.workers = cannonWorker
 LaunchArcs.start(V2, plot2, hub)
 Receipt2.onShown = function(_on: boolean) end
 -- the hub steps aside for whatever's on top: while a panel, the crate opening or the receipt is up,

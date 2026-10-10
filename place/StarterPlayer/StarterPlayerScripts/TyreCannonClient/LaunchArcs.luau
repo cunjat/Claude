@@ -17,6 +17,8 @@ local PackFX = require(script.Parent.PackFX)
 local Sound = require(script.Parent.Sound)
 
 local LaunchArcs = {}
+-- the yards' workers (CannonWorker), set by Main: a shot waits for its worker to press the button
+LaunchArcs.workers = nil :: any
 
 local GRAVITY = Vector3.new(0, -140, 0)
 local LIFE = 4.2
@@ -114,13 +116,25 @@ function LaunchArcs.start(remotes: Instance, plot2, hub)
 		launched.OnClientEvent:Connect(function(userId: number, plotIndex: number?)
 			if userId == me then return end
 			local plot = plotByIndex(plotIndex)
-			if plot then LaunchArcs.fire(plot, plot2, false) end
+			if not plot then return end
+			-- the yard's worker comes out and fires it (CannonWorker), if there is one
+			if LaunchArcs.workers then
+				LaunchArcs.workers:fire(plot, function() LaunchArcs.fire(plot, plot2, false) end)
+			else
+				LaunchArcs.fire(plot, plot2, false)
+			end
 		end)
 	end
 	if auto then
 		auto.OnClientEvent:Connect(function(plotIndex: number?, cash: number?)
 			local plot = plotByIndex(plotIndex)
-			if plot then LaunchArcs.fire(plot, plot2, true) end
+			if plot then
+				if LaunchArcs.workers then
+					LaunchArcs.workers:fire(plot, function() LaunchArcs.fire(plot, plot2, true) end)
+				else
+					LaunchArcs.fire(plot, plot2, true)
+				end
+			end
 			if cash and hub and hub.toast then
 				hub:toast(("AUTO-CANNON  +$%s"):format(Game.short(cash)), Color3.fromRGB(236, 196, 120))
 			end
