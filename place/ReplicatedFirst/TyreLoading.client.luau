@@ -1,8 +1,7 @@
 --!strict
 -- TYRE CANNON :: Loading (ReplicatedFirst)
--- The loading plate. It starts on the steel plate (art/ui/ps/intro.jsx) and, once the world is in,
--- the plate fades away onto the lobby itself in a slow orbit, darkened top and bottom so the words
--- read. The title is drawn here in the kit's look (a gold-to-orange fill, a thick near-black edge,
+-- The loading plate: the steel plate (art/ui/ps/intro.jsx) covers everything until the game is
+-- ready (the world is never seen behind it). The title is drawn here in the kit's look (a gold-to-orange fill, a thick near-black edge,
 -- a drop shadow): its letters slam in one after another, settle with a squash, a shine runs across
 -- and they ride a slow wave. Then the tyre rolls onto the bar, and the bar fills one step at a
 -- time: waking up, fetching your save, then each of Preload's stages. Every step stays on
@@ -514,45 +513,6 @@ if not game:IsLoaded() then game.Loaded:Wait() end
 ownDone[1] = 1
 mark("game loaded")
 
--- the plate fades onto the lobby itself: the camera circles the plaza slowly in the day's light,
--- with a dark wash top and bottom so the title and the bar read over it. (If there's no lobby,
--- the plate just stays.)
-local orbitConn: RBXScriptConnection? = nil
-task.spawn(function()
-	local lobby = workspace:WaitForChild("Lobby", 15)
-	local plaza = lobby and lobby:WaitForChild("Plaza", 10)
-	if not plaza then return end
-	local centre = Vector3.new(-6000, 0, 6000)
-	local floor = plaza:FindFirstChild("PlazaFloor") :: BasePart?
-	if floor then centre = floor.Position end
-	local cam = workspace.CurrentCamera
-	cam.CameraType = Enum.CameraType.Scriptable
-	local t0 = os.clock()
-	orbitConn = RunService.RenderStepped:Connect(function()
-		local t = os.clock() - t0
-		local a = 0.6 + t * 0.045
-		local r = 300 + math.sin(t * 0.13) * 30
-		local eye = centre + Vector3.new(math.cos(a) * r, 95 + math.sin(t * 0.2) * 12, math.sin(a) * r)
-		cam.CameraType = Enum.CameraType.Scriptable
-		cam.CFrame = CFrame.lookAt(eye, centre + Vector3.new(0, 18, 0))
-		cam.FieldOfView = 55
-	end)
-	-- the wash, then the plate lifts off it
-	for _, top in ipairs({ true, false }) do
-		local v = mk("Frame", {
-			AnchorPoint = Vector2.new(0, top and 0 or 1), Position = UDim2.fromScale(0, top and 0 or 1), Size = UDim2.fromScale(1, top and 0.62 or 0.5),
-			BackgroundColor3 = Color3.fromRGB(8, 8, 12), BorderSizePixel = 0, ZIndex = 4, BackgroundTransparency = 1, Parent = door,
-		})
-		local g = mk("UIGradient", { Rotation = top and 90 or -90, Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.15), NumberSequenceKeypoint.new(1, 1) }), Parent = v })
-		local _ = g
-		tween(v, 1.2, { BackgroundTransparency = 0 })
-	end
-	task.wait(0.6)
-	tween(doorImg, 1.4, { ImageTransparency = 1 })
-	tween(door, 1.4, { BackgroundTransparency = 1 })
-	tween(black, 1.4, { BackgroundTransparency = 1 })
-end)
-
 local Root = ReplicatedStorage:WaitForChild("TyreCannon", 60)
 if Root then
 	local remotes = Root:WaitForChild("Remotes", 30)
@@ -622,7 +582,6 @@ do
 end
 
 -- hand the world over: the camera behind the character, the menus back
-if orbitConn then orbitConn:Disconnect() end
 do
 	local cam = workspace.CurrentCamera
 	local hum = player.Character and player.Character:FindFirstChildOfClass("Humanoid")

@@ -929,6 +929,33 @@ task.spawn(function()
 			playerGui:SetAttribute("LoadStageK", k)
 		end)
 	end)
+	-- and the interface itself: every image in every screen has actually arrived (the last stage
+	-- holds at the end of the bar until they have, up to a limit)
+	-- (only what's on screen: an image in a hidden menu loads when the menu opens, and Preload has
+	-- already fetched those)
+	local function shown(g: Instance): boolean
+		local o: Instance? = g
+		while o and o ~= playerGui do
+			-- (the hub is only hidden for the intro: its images count)
+			if o:IsA("GuiObject") and not o.Visible and o.Name ~= "Hub2" then return false end
+			if o:IsA("LayerCollector") and not o.Enabled then return false end
+			o = o.Parent
+		end
+		return true
+	end
+	local t1 = os.clock()
+	while os.clock() - t1 < 15 do
+		local waiting = 0
+		for _, d in ipairs(playerGui:GetDescendants()) do
+			if (d:IsA("ImageLabel") or d:IsA("ImageButton")) and (d :: any).Image ~= "" and not (d :: any).IsLoaded
+				and d:FindFirstAncestor("TyreLoading") == nil and shown(d) then
+				waiting += 1
+			end
+		end
+		if waiting == 0 then break end
+		playerGui:SetAttribute("LoadStageName", ("THE INTERFACE  ·  %d TO GO"):format(waiting))
+		task.wait(0.2)
+	end
 	playerGui:SetAttribute("TyreReady", true)
 	-- (no title: the loading plate drives its tyre off and the game is there)
 end)

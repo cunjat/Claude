@@ -3,8 +3,8 @@
 -- Our own shift lock, on Ctrl because Shift is sprint. While it's on the mouse is held at the
 -- centre under the steel crosshair, the camera swings over your right shoulder on a spring (a
 -- little overshoot, and it leans out the way you strafe), and you turn to face where it looks,
--- quickly but never in a snap. The badge in the bottom right is a key cap, the name and a light:
--- lit green and popping when it's on; click it to toggle. A word flashes by the crosshair.
+-- quickly but never in a snap. The badge in the bottom right is a hub tile (the padlock, CTRL on
+-- it), lit green when it's on; click it to toggle. A word flashes by the crosshair.
 -- It stands aside whenever the camera isn't following you on foot: the workbench, a run,
 -- spectating, a menu, the chair.
 
@@ -25,7 +25,7 @@ local TURN_RATE = 16       -- how fast you turn to face the camera (higher is sn
 ShiftLock.Keys = { Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl }
 
 local ON_COL = Color3.fromRGB(110, 230, 120)
-local OFF_COL = Color3.fromRGB(70, 72, 80)
+local OFF_COL = Color3.fromRGB(110, 112, 122)
 
 function ShiftLock.new(gui: ScreenGui, blocked: (() -> boolean)?)
 	local self = setmetatable({}, ShiftLock)
@@ -44,51 +44,17 @@ function ShiftLock.new(gui: ScreenGui, blocked: (() -> boolean)?)
 		UserSettings():GetService("UserGameSettings").RotationType = Enum.RotationType.MovementRelative
 	end)
 
-	-- the badge: a key cap, SHIFT LOCK, and a light
-	local badge = UI.mk("TextButton", {
-		Name = "ShiftLock", AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -18, 1, -18),
-		Size = UDim2.fromOffset(176, 42), BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 3, Parent = gui,
+	-- the badge: one of the hub's own tiles (the padlock, CTRL on it), grey when off, lit green when
+	-- on; it lifts on hover and toggles on a click like the others
+	local wrap = UI.mk("Frame", {
+		Name = "ShiftLock", AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, -20, 1, -20), Size = UDim2.fromOffset(74, 74),
+		BackgroundTransparency = 1, ZIndex = 3, Parent = gui,
 	})
-	UI.autoScale(badge, 1280, 760)
-	local holder = UI.mk("Frame", { Name = "Holder", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 3, Parent = badge })
-	local pill = Kit.slice("counter", nil, holder, 3, 0.45)
-	pill.ImageTransparency = 0.1
-	local cap = UI.mk("Frame", {
-		Name = "Cap", AnchorPoint = Vector2.new(0, 0.5), Position = UDim2.new(0, 8, 0.5, -1), Size = UDim2.fromOffset(48, 28),
-		BackgroundColor3 = Color3.fromRGB(46, 47, 52), ZIndex = 4, Parent = holder,
-	}, { UI.corner(6) })
-	local capStroke = UI.mk("UIStroke", { Color = C.ink, Thickness = 2, Parent = cap })
-	-- the key's lit lower lip
-	UI.mk("Frame", {
-		AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 3, 1, -2), Size = UDim2.new(1, -6, 0, 3),
-		BackgroundColor3 = Color3.fromRGB(24, 24, 28), BorderSizePixel = 0, ZIndex = 5, Parent = cap,
-	}, { UI.corner(2) })
-	local capText = Kit.text("CTRL", 13, C.white, 0, Kit.Body)
-	capText.Size = UDim2.new(1, 0, 1, -3)
-	capText.ZIndex = 6
-	capText.Parent = cap
-	local name = Kit.text("SHIFT LOCK", 14, C.muted, 1.5)
-	name.AnchorPoint = Vector2.new(0, 0.5)
-	name.TextXAlignment = Enum.TextXAlignment.Left
-	name.Position = UDim2.new(0, 64, 0.5, -1)
-	name.Size = UDim2.fromOffset(84, 18)
-	Kit.fit(name, 14, 9)
-	name.ZIndex = 5
-	name.Parent = holder
-	local light = UI.mk("Frame", {
-		Name = "Light", AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -12, 0.5, -1), Size = UDim2.fromOffset(14, 14),
-		BackgroundColor3 = OFF_COL, ZIndex = 6, Parent = holder,
-	}, { UI.corner(7) })
-	UI.mk("UIStroke", { Color = C.ink, Thickness = 2, Parent = light })
-	local glow = UI.mk("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(40, 40), BackgroundTransparency = 1,
-		Image = Kit.Art.glow, ImageColor3 = ON_COL, ImageTransparency = 1, ZIndex = 5, Parent = light,
-	})
-	badge.MouseEnter:Connect(function() Kit.tween(holder, 0.12, { Position = UDim2.fromOffset(0, -3) }, Enum.EasingStyle.Back) end)
-	badge.MouseLeave:Connect(function() Kit.tween(holder, 0.12, { Position = UDim2.fromOffset(0, 0) }) end)
-	badge.Activated:Connect(function() self:toggle() end)
-	self.badge, self.holder, self.cap, self.capStroke, self.nameLabel, self.light, self.glow = badge, holder, cap, capStroke, name, light, glow
-
+	UI.autoScale(wrap, 1280, 760)
+	local tile = Kit.tile(Kit.Icon.lock, "Ctrl", C.grey, 74)
+	tile.root.Parent = wrap
+	tile.onClick = function() self:toggle() end
+	self.badge, self.tile = wrap, tile
 	-- the word by the crosshair
 	local word = Kit.text("", 18, C.white, 2)
 	word.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -103,16 +69,7 @@ function ShiftLock.new(gui: ScreenGui, blocked: (() -> boolean)?)
 
 	UserInputService.InputBegan:Connect(function(input, gpe)
 		if gpe or UserInputService:GetFocusedTextBox() then return end
-		if table.find(ShiftLock.Keys, input.KeyCode) then
-			-- the key cap presses down with the key
-			Kit.tween(self.cap, 0.05, { Position = UDim2.new(0, 8, 0.5, 1) })
-			self:toggle()
-		end
-	end)
-	UserInputService.InputEnded:Connect(function(input)
-		if table.find(ShiftLock.Keys, input.KeyCode) then
-			Kit.tween(self.cap, 0.18, { Position = UDim2.new(0, 8, 0.5, -1) }, Enum.EasingStyle.Back)
-		end
+		if table.find(ShiftLock.Keys, input.KeyCode) then self:toggle() end
 	end)
 	UserInputService.LastInputTypeChanged:Connect(function() self:refreshBadge() end)
 	RunService:BindToRenderStep("TyreShiftLock", Enum.RenderPriority.Camera.Value + 1, function(dt) self:step(dt) end)
@@ -122,13 +79,12 @@ end
 
 function ShiftLock:paint(animate: boolean)
 	local on = self.on
-	Kit.tween(self.light, 0.15, { BackgroundColor3 = if on then ON_COL else OFF_COL })
-	Kit.tween(self.glow, 0.2, { ImageTransparency = if on then 0.25 else 1 })
-	self.nameLabel.TextColor3 = if on then C.white else C.muted
-	self.cap.BackgroundColor3 = if on then Color3.fromRGB(64, 120, 70) else Color3.fromRGB(46, 47, 52)
+	self.tile.setColor(if on then ON_COL else OFF_COL)
+	local holder = self.tile.root:FindFirstChild("Holder")
+	local icon = holder and holder:FindFirstChild("Icon") :: ImageLabel?
+	if icon then icon.ImageTransparency = if on then 0 else 0.35 end
 	if animate then
-		Kit.pop(self.holder, if on then 0.8 else 0.9, 0.28)
-		Kit.pop(self.light, 1.8, 0.3)
+		if holder then Kit.pop(holder :: Frame, if on then 0.78 else 0.9, 0.28) end
 		if self.active or on then
 			local w = self.word
 			w.Text = if on then "SHIFT LOCK ON" else "SHIFT LOCK OFF"
