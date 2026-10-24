@@ -118,6 +118,10 @@ function Loop.init(S)
 	--==============================================================
 	local function syncV4(player: Player, p, v)
 		v.pres = p.prestige or 0
+		-- a layout that doesn't fit the yard it's on (saved before prestiges refitted it): fitted now
+		if v.layout and not Game.yardCheck(v.layout, v.tier) then
+			v.layout = Game.yardFit(v.layout, v.tier, { prestige = p.prestige, passes = v.passes })
+		end
 		-- the stage's trial: a fresh one whenever the prestige or the stage changes
 		local key = v.pres .. ":" .. v.tier
 		if not v.trial or v.trial.key ~= key then
@@ -718,6 +722,8 @@ function Loop.init(S)
 		p.credits = 0
 		v.tier = 1
 		v.overhauls = 0
+		-- (the yard is stage 1 again: the layout made to fit it, so the editor opens on a valid yard)
+		if v.layout then v.layout = Game.yardFit(v.layout, 1, { prestige = p.prestige, passes = v.passes }) end
 		local head = math.min(Game.perkLv(v, "headstart"), Game.LevelsPerTier - 1)
 		for _, id in ipairs(Game.Overhaul.Machines) do v.mach[id] = head end
 		v.reached = 0

@@ -1500,7 +1500,11 @@ function Game.yardCheck(layout: YardLayout, tier: number?): (boolean, { [string]
 		end
 		for _, u in ipairs(Y.Units) do
 			for _, ub in ipairs(boxes[u.id]) do
-				if overlap(b, ub, 1) then bad[id] = true end
+				-- (both of them: a machine carried onto decor is as wrong as decor put on a machine)
+				if overlap(b, ub, 1) then
+					bad[id] = true
+					bad[u.id] = true
+				end
 			end
 		end
 		for j = 1, i - 1 do
@@ -1511,6 +1515,29 @@ function Game.yardCheck(layout: YardLayout, tier: number?): (boolean, { [string]
 		end
 	end
 	return next(bad) == nil, bad
+end
+
+-- a layout made to fit a yard at `tier` (after a prestige the yard is stage 1 again): the stage's
+-- rules applied, then any machine still in the wrong place back on its own spot and any decor still
+-- in the wrong place taken off, until it passes (in the end: every machine home, no decor)
+function Game.yardFit(raw: any, tier: number?, access: { prestige: number?, passes: { [string]: any }? }?): YardLayout
+	local layout = Game.yardLayout(raw, tier, access)
+	for _ = 1, 4 do
+		local ok, bad = Game.yardCheck(layout, tier)
+		if ok then return layout end
+		for _, u in ipairs(Game.Yard.Units) do
+			if bad[u.id] then layout[u.id] = { x = u.x, z = u.z, r = u.r } end
+		end
+		local keep = {}
+		for i, d in ipairs(layout.decor or {}) do
+			if not bad["d" .. i] then table.insert(keep, d) end
+		end
+		layout.decor = keep
+	end
+	if Game.yardCheck(layout, tier) then return layout end
+	local home = Game.yardLayout(nil, tier, access)
+	home.floor, home.fence = layout.floor, layout.fence
+	return home
 end
 
 -- where a machine stands in plot space under a layout

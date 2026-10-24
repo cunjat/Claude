@@ -70,6 +70,12 @@ for dx = -5, 5 do
 end
 table.sort(NEAR, function(a, b) return a[3] < b[3] end)
 
+-- (a card in the drawer's grid is placed by the grid: its face shakes, not the cell)
+local function shakeCard(card: GuiObject)
+	local face = card:FindFirstChild("Holder")
+	Kit.shake(if face and face:IsA("GuiObject") then face else card, 5, 0.2)
+end
+
 local function tuned(name: string, default: any): any
 	if RunService:IsStudio() then
 		local v = workspace:GetAttribute(name)
@@ -137,7 +143,7 @@ function YardEdit.new(gui: ScreenGui, remotes: Instance, plot2)
 	self.root = root
 
 	-- the top bar
-	local top = UI.mk("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 16), Size = UDim2.fromOffset(860, 70), BackgroundTransparency = 1, Parent = root })
+	local top = UI.mk("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 16), Size = UDim2.fromOffset(860, 70), BackgroundTransparency = 1, Active = true, Parent = root })
 	UI.autoScale(top, 1280, 760)
 	Kit.slice("panel_body", nil, top, 1, 0.45)
 	Kit.slice("panel_ring", C.teal, top, 2, 0.45)
@@ -202,7 +208,7 @@ function YardEdit.new(gui: ScreenGui, remotes: Instance, plot2)
 	close.onClick = function() self:leave() end
 
 	-- the catalogue, down the right
-	local drawer = UI.mk("Frame", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -18, 0.56, 0), Size = UDim2.fromOffset(352, 560), BackgroundTransparency = 1, Parent = root })
+	local drawer = UI.mk("Frame", { AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -18, 0.56, 0), Size = UDim2.fromOffset(352, 560), BackgroundTransparency = 1, Active = true, Parent = root })
 	UI.autoScale(drawer, 1280, 760)
 	Kit.slice("panel_body", nil, drawer, 1, 0.45)
 	Kit.slice("panel_ring", C.teal, drawer, 2, 0.45)
@@ -239,7 +245,7 @@ function YardEdit.new(gui: ScreenGui, remotes: Instance, plot2)
 	self.cards = {}
 
 	-- the sets, down the left
-	local sets = UI.mk("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 18, 1, -18), Size = UDim2.fromOffset(270, 54 + #Game.DecorSets * 27), BackgroundTransparency = 1, Parent = root })
+	local sets = UI.mk("Frame", { AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 18, 1, -18), Size = UDim2.fromOffset(270, 54 + #Game.DecorSets * 27), BackgroundTransparency = 1, Active = true, Parent = root })
 	UI.autoScale(sets, 1280, 760)
 	Kit.slice("panel_body", nil, sets, 1, 0.45)
 	Kit.slice("panel_ring", C.gold, sets, 2, 0.45)
@@ -281,7 +287,7 @@ function YardEdit.new(gui: ScreenGui, remotes: Instance, plot2)
 	end
 
 	-- the bar along the bottom: what's selected and what to do with it, or how to start
-	local bar = UI.mk("Frame", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, -60, 1, -18), Size = UDim2.fromOffset(560, 64), BackgroundTransparency = 1, Parent = root })
+	local bar = UI.mk("Frame", { AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, -60, 1, -18), Size = UDim2.fromOffset(560, 64), BackgroundTransparency = 1, Active = true, Parent = root })
 	UI.autoScale(bar, 1280, 760)
 	self.bar = bar
 	local plate = UI.mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Parent = bar })
@@ -295,7 +301,7 @@ function YardEdit.new(gui: ScreenGui, remotes: Instance, plot2)
 	self.selLabel.ZIndex = 5
 	self.selLabel.Parent = bar
 	local how = UserInputService.TouchEnabled and "Drag anything to move it.  Two fingers look round."
-		or "Click anything to move it.  R turns.  Right-drag looks round.  WASD pans.  F resets the view."
+		or "Click anything to move it.  R turns.  Z undoes.  Right-drag looks round.  WASD pans.  F resets the view."
 	self.hint = Kit.text(how, 15, C.white, 1.5, Kit.Body)
 	self.hint.Position = UDim2.fromOffset(16, 0)
 	self.hint.Size = UDim2.new(1, -32, 1, 0)
@@ -546,10 +552,11 @@ function YardEdit:pickSkin(which: string, id: string, card: GuiObject?)
 	local opt = (if which == "floor" then Game.YardFloorsById else Game.YardFencesById)[id]
 	if not opt then return end
 	if opt.tier > self:tier() then
-		if card then Kit.shake(card, 5, 0.2) end
+		if card then shakeCard(card) end
 		Kit.callout(self.gui, ("Unlocks at stage %d"):format(opt.tier), C.red, UDim2.fromScale(0.5, 0.2), 30)
 		return
 	end
+	self:snapshot()
 	self.layout[which] = id
 	self.stats.skins += 1
 	PlotStage.preview(self.plotModel, self.layout.floor or "stage", self.layout.fence or "stage")
@@ -697,7 +704,7 @@ function YardEdit:addDecor(kindId: string, card: GuiObject?)
 	local kind = Game.YardDecorById[kindId]
 	local tier = self:tier()
 	if kind and not self:owns(kind) then
-		if card then Kit.shake(card, 5, 0.2) end
+		if card then shakeCard(card) end
 		if kind.pass then
 			Kit.callout(self.gui, "Part of the Midnight Garage pass", C.purple, UDim2.fromScale(0.5, 0.2), 30)
 			self:offerPass()
@@ -707,13 +714,13 @@ function YardEdit:addDecor(kindId: string, card: GuiObject?)
 		return
 	end
 	if not kind or kind.tier > tier then
-		if card then Kit.shake(card, 5, 0.2) end
+		if card then shakeCard(card) end
 		Kit.callout(self.gui, ("Unlocks at stage %d"):format(kind and kind.tier or 0), C.red, UDim2.fromScale(0.5, 0.2), 30)
 		return
 	end
 	local decor = self.layout.decor
 	if #decor >= Game.yardDecorMax(tier) then
-		if card then Kit.shake(card, 5, 0.2) end
+		if card then shakeCard(card) end
 		Kit.callout(self.gui, "No more room for decor at this stage", C.red, UDim2.fromScale(0.5, 0.2), 28)
 		return
 	end
@@ -722,6 +729,7 @@ function YardEdit:addDecor(kindId: string, card: GuiObject?)
 	local cx = math.floor(self.view.target.X / G + 0.5) * G
 	local cz = math.floor(self.view.target.Z / G + 0.5) * G
 	local entry = { k = kindId, x = cx, z = cz, r = 0 }
+	self:snapshot()
 	table.insert(decor, entry)
 	local n = #decor
 	local found = false
@@ -740,6 +748,7 @@ function YardEdit:addDecor(kindId: string, card: GuiObject?)
 	end
 	if not found then
 		table.remove(decor, n)
+		self:dropSnapshot()
 		Kit.callout(self.gui, "No free floor for that", C.red, UDim2.fromScale(0.5, 0.2), 30)
 		return
 	end
@@ -779,6 +788,84 @@ function YardEdit:addDecor(kindId: string, card: GuiObject?)
 end
 
 -- a piece fresh from the drawer goes back in it
+--==============================================================
+-- undo: a copy of the layout before each change, newest last (40 kept)
+--==============================================================
+function YardEdit:snapshot()
+	if not self.undo then self.undo = {} end
+	table.insert(self.undo, copy(self.layout))
+	if #self.undo > 40 then table.remove(self.undo, 1) end
+end
+
+function YardEdit:dropSnapshot()
+	if self.undo and #self.undo > 0 then table.remove(self.undo) end
+end
+
+function YardEdit:undoStep()
+	if self.closing or self.saving then return end
+	-- a piece in the hand goes back first (that's the undo, if it was all there was)
+	if self.carrying then
+		self:cancelCarry()
+		self:dropSnapshot()
+		return
+	end
+	if self.held then
+		self:putBack()
+		return
+	end
+	local prev = self.undo and table.remove(self.undo)
+	if not prev then
+		Kit.callout(self.gui, "Nothing to undo", C.muted, UDim2.fromScale(0.5, 0.2), 26)
+		return
+	end
+	self.layout = prev
+	self.selected = nil
+	self.hover = nil
+	self.settledFor = nil
+	for _, u in ipairs(Game.Yard.Units) do self:shortWay(u.id) end
+	PlotStage.preview(self.plotModel, self.layout.floor or "stage", self.layout.fence or "stage")
+	self:syncDecor()
+	self:refreshPlates()
+	self:refreshDrawer()
+	self:refreshSelection()
+	Sound.play("gateWhoosh", { volume = 0.25, pitch = 1.1 })
+end
+
+-- what's lifted goes back where it was picked up (a second finger, or undo while holding)
+function YardEdit:putBack()
+	local id = self.held
+	local from = self.pickedFrom
+	self.held = nil
+	if id and from then
+		local s = self:spot(id)
+		if s then
+			s.x, s.z, s.r = from.x, from.z, from.r
+			if decorIndex(id) then (s :: any).a = from.a end
+			self:shortWay(id)
+		end
+	end
+	self:dropSnapshot()
+	self.landing = id
+	self:refreshPlates()
+end
+
+-- a thing's shown turn brought round to the nearest equal of where it's going, so it never spins
+-- the long way back
+function YardEdit:shortWay(id: string)
+	local sh = self.shown and self.shown[id]
+	local s = self:spot(id)
+	if not (sh and s) then return end
+	if sh.r then
+		while sh.r - s.r > 2 do sh.r -= 4 end
+		while s.r - sh.r > 2 do sh.r += 4 end
+	end
+	if sh.a and (s :: any).a then
+		local a = (s :: any).a
+		while sh.a - a > 12 do sh.a -= 24 end
+		while a - sh.a > 12 do sh.a += 24 end
+	end
+end
+
 function YardEdit:cancelCarry()
 	local id = self.carrying
 	self.carrying = nil
@@ -848,6 +935,7 @@ end
 function YardEdit:remove()
 	local i = decorIndex(self.selected)
 	if not i or self.closing then return end
+	if not self.carrying then self:snapshot() end
 	table.remove(self.layout.decor, i)
 	self.selected = nil
 	self.held = nil
@@ -863,12 +951,23 @@ function YardEdit:open(plot: Instance, onClose: (() -> ())?)
 	if self.open_ then return end
 	local base = plot:GetAttribute("BaseCFrame") :: CFrame?
 	local y = self.plot2.yards[plot]
-	if not (base and y) then return end
+	if not (base and y) then
+		-- (not ready to edit: hand straight back, so the hub comes back rather than leaving you stuck)
+		if onClose then task.defer(onClose) end
+		return
+	end
 	self.open_ = true
 	self.plotModel = plot
 	self.base = base
 	self.onClose = onClose
-	self.saved = self.plot2:layoutOf(plot)
+	-- the saved layout as this stage's rules have it (after a prestige the yard is stage 1 again:
+	-- anything that no longer fits is put home or taken off, so the editor opens on a valid yard)
+	local access = { prestige = (plot:GetAttribute("V2_Prestige") :: number?) or 0, passes = { midnight = plot:GetAttribute("V2_Midnight") == true } }
+	self.saved = Game.yardFit(self.plot2:layoutOf(plot), self:tier(), access)
+	self.undo = {}
+	self.saving = false
+	self.touch = nil
+	self.lastPointer = nil
 	self.lookSaved = (plot:GetAttribute("V2_Look") :: string?) or "stage"
 	self.lookChoice = nil
 	self.layout = copy(self.saved)
@@ -936,6 +1035,11 @@ function YardEdit:open(plot: Instance, onClose: (() -> ())?)
 		if st == Enum.UserInputState.Begin then self:remove() end
 		return Enum.ContextActionResult.Sink
 	end, false, 2500, Enum.KeyCode.Delete, Enum.KeyCode.Backspace, Enum.KeyCode.ButtonX)
+	-- Z (or Ctrl+Z) steps back: a move, a turn, a piece added or taken off, a reset, a floor or fence
+	ContextActionService:BindActionAtPriority("TC_YardUndo", function(_, st)
+		if st == Enum.UserInputState.Begin then self:undoStep() end
+		return Enum.ContextActionResult.Sink
+	end, false, 2500, Enum.KeyCode.Z)
 	self.pan = {}
 	ContextActionService:BindActionAtPriority("TC_YardPan", function(_, st, io)
 		self.pan[io.KeyCode] = st == Enum.UserInputState.Begin or st == Enum.UserInputState.Change
@@ -951,7 +1055,17 @@ function YardEdit:open(plot: Instance, onClose: (() -> ())?)
 	self.conns = {
 		UserInputService.InputBegan:Connect(function(io, processed)
 			if processed then return end
-			if io.UserInputType == Enum.UserInputType.MouseButton1 or io.UserInputType == Enum.UserInputType.Touch then
+			if io.UserInputType == Enum.UserInputType.Touch then
+				-- one finger moves things; a second finger (a pinch or a twist) puts back what was lifted
+				if self.touch then
+					if self.held and not self.carrying then self:putBack() end
+					return
+				end
+				self.touch = io
+				self.lastPointer = Vector2.new(io.Position.X, io.Position.Y)
+				self:press(self.lastPointer)
+			elseif io.UserInputType == Enum.UserInputType.MouseButton1 then
+				self.lastPointer = Vector2.new(io.Position.X, io.Position.Y)
 				self:press(Vector2.new(io.Position.X, io.Position.Y))
 			elseif io.UserInputType == Enum.UserInputType.MouseButton2 then
 				self.orbiting = true
@@ -961,6 +1075,9 @@ function YardEdit:open(plot: Instance, onClose: (() -> ())?)
 		end),
 		UserInputService.InputChanged:Connect(function(io, processed)
 			if io.UserInputType == Enum.UserInputType.MouseMovement or io.UserInputType == Enum.UserInputType.Touch then
+				-- (only the finger that started it, never a drawer scroll or a second finger)
+				if io.UserInputType == Enum.UserInputType.Touch and io ~= self.touch then return end
+				self.lastPointer = Vector2.new(io.Position.X, io.Position.Y)
 				if self.orbiting and io.UserInputType == Enum.UserInputType.MouseMovement then
 					self.view.yaw -= io.Delta.X * 0.006
 					self.view.pitch = math.clamp(self.view.pitch + io.Delta.Y * 0.004, PITCH_MIN, PITCH_MAX)
@@ -977,7 +1094,17 @@ function YardEdit:open(plot: Instance, onClose: (() -> ())?)
 			end
 		end),
 		UserInputService.InputEnded:Connect(function(io)
-			if io.UserInputType == Enum.UserInputType.MouseButton1 or io.UserInputType == Enum.UserInputType.Touch then
+			if io.UserInputType == Enum.UserInputType.Touch then
+				if io ~= self.touch then return end
+				self.touch = nil
+				self:release()
+				-- (no pointer left over the yard: nothing stays hovered)
+				if self.hover then
+					self.hover = nil
+					self:refreshPlates()
+					self:refreshSelection()
+				end
+			elseif io.UserInputType == Enum.UserInputType.MouseButton1 then
 				self:release()
 			elseif io.UserInputType == Enum.UserInputType.MouseButton2 then
 				self.orbiting = false
@@ -1001,6 +1128,7 @@ end
 -- (2026-10-24) Q and the X used to throw away every unsaved change without a word: with changes,
 -- the first press warns and a second within 3 s discards them
 function YardEdit:leave()
+	if self.saving then return end
 	local HttpService = game:GetService("HttpService")
 	local okA, a = pcall(HttpService.JSONEncode, HttpService, self.layout)
 	local okB, b = pcall(HttpService.JSONEncode, HttpService, self.saved)
@@ -1015,9 +1143,16 @@ function YardEdit:leave()
 end
 
 function YardEdit:close(save: boolean)
-	if not self.open_ or self.closing then return end
+	-- (one save at a time: DONE twice, or Q during the round trip, waits for it)
+	if not self.open_ or self.closing or self.saving then return end
 	if save then
+		self.saving = true
 		local ok, res = pcall(function() return (self.R :: any).Layout:InvokeServer(self.layout) end)
+		self.saving = false
+		if ok and type(res) == "table" and res.ok and type(res.layout) == "string" then
+			-- what the server kept is what's drawn
+			self.layout = Game.yardDecode(res.layout)
+		end
 		if not (ok and type(res) == "table" and res.ok) then
 			Kit.callout(self.gui, "Something's in the way", C.red, UDim2.fromScale(0.5, 0.2), 34)
 			Kit.shake(self.doneBtn.root, 6, 0.25)
@@ -1048,6 +1183,7 @@ function YardEdit:close(save: boolean)
 	ContextActionService:UnbindAction("TC_YardRemove")
 	ContextActionService:UnbindAction("TC_YardLeave")
 	ContextActionService:UnbindAction("TC_YardPan")
+	ContextActionService:UnbindAction("TC_YardUndo")
 	self.orbiting = false
 	for _, c in ipairs(self.conns or {}) do c:Disconnect() end
 	self.conns = nil
@@ -1095,6 +1231,7 @@ end
 
 -- the machines back where they started (the decor stays)
 function YardEdit:reset()
+	self:snapshot()
 	local start = Game.yardLayout(nil)
 	for _, u in ipairs(Game.Yard.Units) do
 		local s = start[u.id]
@@ -1152,7 +1289,8 @@ function YardEdit:unitAt(p: Vector3): string?
 	-- smallest wins: the cannon's big box never swallows the barrel or crate sitting by it.
 	-- Nothing under it: the nearest thing within a few studs.
 	local best, bestArea = nil, math.huge
-	local near, nearD = nil, 7
+	-- (a near miss still finds it, a finger more generously; a click well clear of everything is bare floor)
+	local near, nearD = nil, if UserInputService:GetLastInputType() == Enum.UserInputType.Touch then 6 else 2.5
 	local function try(id: string, box: { number })
 		local w, d = box[3] - box[1], box[4] - box[2]
 		local area = w * d
@@ -1179,7 +1317,8 @@ end
 function YardEdit:pickAt(screen: Vector2, p: Vector3?): string?
 	local cam = workspace.CurrentCamera
 	local ray = cam:ScreenPointToRay(screen.X, screen.Y)
-	local best, bestT = nil, math.huge
+	local best: string? = nil
+	local hits = {}
 	local function test(id: string, m: Instance?)
 		if not (m and m:IsA("Model") and m.Parent) then return end
 		local cf, size = m:GetBoundingBox()
@@ -1198,11 +1337,8 @@ function YardEdit:pickAt(screen: Vector2, p: Vector3?): string?
 				if t0 > t1 then return end
 			end
 		end
-		-- the smallest thing hit wins (bestT holds its volume): decor by a machine is never lost in
-		-- the machine's box
 		local t = if t0 >= 0 then t0 else t1
-		local vol = size.X * size.Y * size.Z
-		if t >= 0 and vol < bestT then best, bestT = id, vol end
+		if t >= 0 then table.insert(hits, { id = id, t0 = math.max(t0, 0), t1 = t1, vol = size.X * size.Y * size.Z }) end
 	end
 	local y = self.plot2.yards[self.plotModel]
 	if y then
@@ -1213,12 +1349,24 @@ function YardEdit:pickAt(screen: Vector2, p: Vector3?): string?
 			if e and e.model then test("d" .. i, e.model) end
 		end
 	end
+	-- the nearest box the ray meets, unless a smaller one starts inside it (decor standing by or in
+	-- front of a machine's bounding box isn't lost in it; a piece hidden behind a tall one is)
+	table.sort(hits, function(a, b) return a.t0 < b.t0 end)
+	local first = hits[1]
+	if first then
+		best = first.id
+		local vol = first.vol
+		for i = 2, #hits do
+			local h = hits[i]
+			if h.t0 <= first.t1 and h.vol < vol then best, vol = h.id, h.vol end
+		end
+	end
 	if best then return best end
 	return p and self:unitAt(p) or nil
 end
 
 function YardEdit:press(screen: Vector2)
-	if self.closing then return end
+	if self.closing or self.saving then return end
 	local p = self:floorAt(screen)
 	if not p then return end
 	-- a fresh piece on the pointer: this click sets it down (if it can stand there)
@@ -1247,6 +1395,7 @@ function YardEdit:press(screen: Vector2)
 		return
 	end
 	local s = self:spot(id)
+	self:snapshot()
 	self.held = id
 	self.selected = id
 	self.settledFor = nil
@@ -1281,16 +1430,30 @@ function YardEdit:settle(id: string, tx: number, tz: number): boolean
 	local F = self:floor()
 	local s = self:spot(id)
 	if not s then return false end
-	local bx = math.clamp(math.floor(tx / G + 0.5) * G, F.x0, F.x1)
-	local bz = math.clamp(math.floor(tz / G + 0.5) * G, F.z0, F.z1)
+	-- its middle kept where its whole footprint stays on the floor (a big machine reaches the edge
+	-- without going red), as it's turned now
+	local lx0, lx1, lz0, lz1 = F.x0, F.x1, F.z0, F.z1
+	do
+		local minX, maxX, minZ, maxZ = 0, 0, 0, 0
+		for _, b in ipairs(self:boxes(id)) do
+			minX, maxX = math.min(minX, b[1] - s.x), math.max(maxX, b[3] - s.x)
+			minZ, maxZ = math.min(minZ, b[2] - s.z), math.max(maxZ, b[4] - s.z)
+		end
+		if F.x0 - minX <= F.x1 - maxX then lx0, lx1 = math.ceil((F.x0 - minX) / G) * G, math.floor((F.x1 - maxX) / G) * G end
+		if F.z0 - minZ <= F.z1 - maxZ then lz0, lz1 = math.ceil((F.z0 - minZ) / G) * G, math.floor((F.z1 - maxZ) / G) * G end
+		if lx0 > lx1 then lx0, lx1 = F.x0, F.x1 end
+		if lz0 > lz1 then lz0, lz1 = F.z0, F.z1 end
+	end
+	local bx = math.clamp(math.floor(tx / G + 0.5) * G, lx0, lx1)
+	local bz = math.clamp(math.floor(tz / G + 0.5) * G, lz0, lz1)
 	-- (the same target as last time: already settled)
 	local key = bx .. "," .. bz
 	if self.settledFor == id and self.settledAt == key then return true end
 	self.settledFor, self.settledAt = id, key
 	local tier = self:tier()
 	for _, o in ipairs(NEAR) do
-		s.x = math.clamp(bx + o[1] * G, F.x0, F.x1)
-		s.z = math.clamp(bz + o[2] * G, F.z0, F.z1)
+		s.x = math.clamp(bx + o[1] * G, lx0, lx1)
+		s.z = math.clamp(bz + o[2] * G, lz0, lz1)
 		local _, bad = Game.yardCheck(self.layout, tier)
 		if not bad[id] then return true end
 	end
@@ -1306,14 +1469,20 @@ function YardEdit:release()
 	local ok, bad = Game.yardCheck(self.layout, self:tier())
 	local from = self.pickedFrom
 	if not ok and bad[id] and from then
-		-- it can't stand there: it slides back to where it came from
+		-- it can't stand there: it slides back to where it came from (turning back the short way)
 		local s = self:spot(id)
 		s.x, s.z, s.r = from.x, from.z, from.r
 		if decorIndex(id) then (s :: any).a = from.a end
+		self:shortWay(id)
+		self:dropSnapshot()
 		Sound.play("gateWhoosh", { volume = 0.3, pitch = 0.8 })
 	elseif from then
 		local s = self:spot(id)
-		if s and (s.x ~= from.x or s.z ~= from.z) then self.stats.moved += 1 end
+		if s and (s.x ~= from.x or s.z ~= from.z) then
+			self.stats.moved += 1
+		elseif s and s.r == from.r and (s :: any).a == from.a then
+			self:dropSnapshot()   -- (picked up and put down where it was: nothing to undo)
+		end
 	end
 	self.landing = id
 	self:refreshPlates()
@@ -1325,9 +1494,12 @@ function YardEdit:angle(dir: number)
 	if not decorIndex(id) or self.closing then return end
 	local s = self:spot(id :: string)
 	local before = Game.decorAngle(s)
+	if not self.held then self:snapshot() end
+	self.settledFor = nil
 	s.a = (before + dir) % 24
 	s.r = s.a // 6
 	local sh = self.shown[id :: string]
+	local shBefore = sh.a
 	-- shown turns the short way round
 	while (sh.a or before) - s.a > 12 do sh.a = (sh.a or before) - 24 end
 	while s.a - (sh.a or before) > 12 do sh.a = (sh.a or before) + 24 end
@@ -1336,6 +1508,8 @@ function YardEdit:angle(dir: number)
 		if not ok and bad[id :: string] then
 			s.a = before
 			s.r = before // 6
+			sh.a = shBefore
+			self:dropSnapshot()
 			Kit.callout(self.gui, "No room to turn", C.red, UDim2.fromScale(0.5, 0.2), 30)
 		end
 	end
@@ -1353,15 +1527,20 @@ function YardEdit:turn()
 	end
 	local s = self:spot(id)
 	if not s then return end
+	if not self.held then self:snapshot() end
+	self.settledFor = nil
 	s.r = (s.r + 1) % 4
 	-- shown turns the short way round, never spinning back through three quarters
 	local sh = self.shown[id]
+	local shBefore = sh.r
 	while sh.r - s.r > 2 do sh.r -= 4 end
 	while s.r - sh.r > 2 do sh.r += 4 end
 	if not self.held then
 		local ok, bad = Game.yardCheck(self.layout, self:tier())
 		if not ok and bad[id] then
 			s.r = (s.r + 3) % 4
+			sh.r = shBefore
+			self:dropSnapshot()
 			Kit.callout(self.gui, "No room to turn", C.red, UDim2.fromScale(0.5, 0.2), 30)
 		end
 	end
@@ -1415,10 +1594,12 @@ function YardEdit:step(dt: number)
 		if P[K.D] or P[K.Right] then mv += right end
 		if P[K.A] or P[K.Left] then mv -= right end
 		if mv.Magnitude > 0 then v.target += mv.Unit * dt * (30 + v.dist * 0.4) end
-		-- carrying something draws the view a little toward it
+		-- carrying something draws the view a little toward it, and the piece stays under the pointer
+		-- while the view moves (not only when the mouse does)
 		if self.held then
 			local s = self:spot(self.held)
 			v.target = v.target:Lerp(Vector3.new(s.x, 0, s.z), math.min(1, dt * 0.8))
+			if self.lastPointer then self:drag(self.lastPointer) end
 		end
 		local F = self:floor()
 		v.target = Vector3.new(math.clamp(v.target.X, F.x0 - 10, F.x1 + 10), 0, math.clamp(v.target.Z, F.z0 - 10, F.z1 + 10))
