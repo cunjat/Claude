@@ -131,8 +131,12 @@ RunService.Heartbeat:Connect(function(dt)
 	s.PlaybackSpeed += (bedSpeed - s.PlaybackSpeed) * (1 - math.exp(-dt * 5))
 end)
 
--- everything loads before it's needed
+-- every sound fetched ahead of its first play, but only once you're in: behind the loading screen
+-- the menus and your yard go first (Preload queues these too, after the road)
 task.spawn(function()
+	local pg = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+	local t0 = os.clock()
+	while not pg:GetAttribute("TyreReady") and os.clock() - t0 < 60 do task.wait(0.5) end
 	local list = {}
 	for _, def in pairs(Sound.Bank) do
 		local s = Instance.new("Sound")

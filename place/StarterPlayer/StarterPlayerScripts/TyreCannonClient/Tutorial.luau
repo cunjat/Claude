@@ -445,7 +445,7 @@ function Tutorial:showChoice()
 	local holder, face = Kit.card(UDim2.fromOffset(600, 290), C.cream)
 	holder.Parent = box
 	Kit.header(face, "Welcome", C.accent, 56)
-	local title = Kit.text("NEW TO TYRE CANNON?", 28, C.white, 2.5, ITALIC)
+	local title = Kit.text("NEW TO LAUNCH A TIRE?", 28, C.white, 2.5, ITALIC)
 	title.Position = UDim2.fromOffset(0, 70)
 	title.Size = UDim2.new(1, 0, 0, 34)
 	title.ZIndex = 5

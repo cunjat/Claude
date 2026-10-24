@@ -5,7 +5,7 @@
 local Config = {}
 
 Config.Version = "0.1.0"
-Config.GameName = "TYRE CANNON"
+Config.GameName = "LAUNCH A TIRE"
 
 --==============================================================
 -- PHYSICS

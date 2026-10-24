@@ -250,15 +250,12 @@ task.spawn(function()
 end)
 Remotes.ProfileUpdated.OnClientEvent:Connect(applyProfile)
 
+-- the character's animations (small). (Every asset used to be queued here as well, a second full
+-- preload on top of Preload's that doubled the download queue behind the loading screen; Preload
+-- does that now, the menus and your yard first and the rest once you're in.)
 task.spawn(function()
 	local ContentProvider = game:GetService("ContentProvider")
 	local list = {}
-	for _, d in ipairs(Root:WaitForChild("Assets"):GetDescendants()) do
-		if d:IsA("MeshPart") or d:IsA("PartOperation") or d:IsA("Decal") or d:IsA("Texture") or d:IsA("SpecialMesh")
-			or d:IsA("ParticleEmitter") or d:IsA("Beam") or d:IsA("Trail") or d:IsA("SurfaceAppearance") then
-			table.insert(list, d)
-		end
-	end
 	for _, id in pairs(Config.Animations or {}) do
 		if type(id) == "string" and id ~= "" then
 			local a = Instance.new("Animation")
@@ -1186,19 +1183,21 @@ end)
 task.spawn(function()
 	local t0 = os.clock()
 	while not profile and os.clock() - t0 < 20 do task.wait(0.1) end
-	-- everything the game will show loads now, behind the loading screen, which shows how far along it is
+	-- the menus and your yard load now, behind the loading screen, which shows how far along it is;
+	-- the road, the tyres, the sounds and the rest of the hub follow once you're in
 	pcall(function() lobbyVista:build() end)
+	local t2 = os.clock()
+	while not myPlot and os.clock() - t2 < 5 do task.wait(0.1) end
+	local Preload: any = nil
 	pcall(function()
-		local Preload = require(script.Parent:WaitForChild("Preload")) :: any
+		Preload = require(script.Parent:WaitForChild("Preload")) :: any
 		playerGui:SetAttribute("LoadStages", #Preload.Stages)
 		Preload.run(gui, function(index: number, name: string, k: number, n: number?, of: number?)
 			playerGui:SetAttribute("LoadStage", index)
 			playerGui:SetAttribute("LoadStageName", name)
 			playerGui:SetAttribute("LoadStageK", k)
 			playerGui:SetAttribute("LoadStageCount", if n and of and of > 0 then ("%d / %d"):format(n, of) else "")
-		end)
-		-- the road, the tyres and the sounds keep loading once you're in
-		task.delay(1, function() pcall(Preload.background) end)
+		end, { plot = function() return myPlot end })
 	end)
 	-- and the interface itself: every image in every screen has actually arrived (the last stage
 	-- holds at the end of the bar until they have, up to a limit)
@@ -1233,7 +1232,11 @@ task.spawn(function()
 		pcall(function() game:GetService("ContentProvider"):PreloadAsync(hubArt) end)
 	end
 	local t1 = os.clock()
-	while os.clock() - t1 < 15 do
+	-- (and gives up waiting once the count has stood still for three seconds: an image that never
+	-- reports in would otherwise hold every join for the full limit)
+	local lastCount, lastMove = math.huge, os.clock()
+	playerGui:SetAttribute("LoadStageK", 0.95)    -- (the bar holds just short of the end meanwhile)
+	while os.clock() - t1 < 15 and os.clock() - lastMove < 3 do
 		local waiting = 0
 		for _, d in ipairs(playerGui:GetDescendants()) do
 			if (d:IsA("ImageLabel") or d:IsA("ImageButton")) and (d :: any).Image ~= "" and not (d :: any).IsLoaded
@@ -1242,10 +1245,14 @@ task.spawn(function()
 			end
 		end
 		if waiting == 0 then break end
+		if waiting < lastCount then lastCount, lastMove = waiting, os.clock() end
 		playerGui:SetAttribute("LoadStageName", ("THE INTERFACE  ·  %d TO GO"):format(waiting))
 		task.wait(0.2)
 	end
+	playerGui:SetAttribute("LoadStageK", 1)
 	playerGui:SetAttribute("TyreReady", true)
+	-- the rest loads now, road first, while you're already in
+	if Preload then task.delay(1, function() pcall(Preload.background) end) end
 	-- (no title: the loading plate drives its tyre off and the game is there)
 end)
 print("[TyreCannon] client ready · " .. Config.VersionLabel)

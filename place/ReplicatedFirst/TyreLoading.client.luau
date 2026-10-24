@@ -35,9 +35,9 @@ local ART = {
 local TYRE = "rbxassetid://126515425222861" -- the game tyre, face-on (the icon studio's)
 -- the title, drawn as text (set USE_ART to show the old word images instead)
 local USE_ART = false
--- (2026-10-22: the game's name, as the Welcome and the store say it, not the working title)
-local TITLE_TOP = "TYRE"
-local TITLE_WORDS = { "CANNON" }
+-- (2026-10-24, the owner: the game is called LAUNCH A TIRE)
+local TITLE_TOP = "LAUNCH A"
+local TITLE_WORDS = { "TIRE" }
 local TIPS = {
 	"Hills are your speed. Tuck on the way down, leave the crest, land on the slope.",
 	"Crates open with keys. Grab them off the road.",
@@ -54,7 +54,7 @@ local FILL = { id = "rbxassetid://112159920394542", slice = Rect.new(46, 40, 482
 
 -- the two steps this script owns, then Preload's stages (Main reports how many there are)
 local OWN_STEPS = { "WAKING UP", "FETCHING YOUR SAVE" }
-local DEFAULT_PRELOAD_STAGES = 6
+local DEFAULT_PRELOAD_STAGES = 2   -- (the interface and your yard; the rest loads once you're in)
 local MIN_STEP = 0.8       -- seconds every step stays on screen, however fast it really was
 local ENTRANCE = 1.5       -- the logo finishes coming in before the bar starts moving
 local BAR_W = 560
@@ -508,7 +508,8 @@ local rollConn = RunService.RenderStepped:Connect(function(dt)
 		end
 		local target = (current - 1 + k) / #stepNames
 		shown += (target - shown) * (1 - math.exp(-dt * 7))
-		if current == #stepNames and k >= 1 and target - shown < 0.004 then
+		-- (never READY before the game says it is: the interface's last images may still be coming in)
+		if current == #stepNames and k >= 1 and target - shown < 0.004 and playerGui:GetAttribute("TyreReady") then
 			shown = 1
 			finished = true
 		end

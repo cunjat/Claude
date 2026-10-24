@@ -5,7 +5,7 @@
 --     other, head tipped back
 --   2 the thinker: hunched forward, forearms on the knees, head down
 --   3 talking to your own tyre (the easter egg): your tyre sits beside you on the bench, you turn to
---     it and chat with your hands, it nods along
+--     it and chat with your hands, it nods along (2026-10-24, the owner: no speech bubble any more)
 -- The rig is R6 (no knees or elbows) and nothing is uploaded: the poses are joint angles written
 -- straight onto the Motor6Ds each frame after the Animator (RunService.Stepped), eased in. The pose
 -- goes to the server (V2.BenchPose) and comes back as the character's BenchPose attribute, so every
@@ -76,19 +76,6 @@ local function pose(k: number, t: number): Pose
 	}
 end
 
-local LINES = {
-	"...and that's why I don't do off-road.",
-	"You're a good listener, you know that?",
-	"We roll together, you and me.",
-	"Don't tell the cannon I said that.",
-	"They say tread carefully. I say tread boldly.",
-	"I'm not tyred, you're tyred.",
-	"Remember the Thar? Sand everywhere.",
-	"One day we'll clear Eight Yards. One day.",
-	"Honestly? Best tyre in the lobby.",
-	"No, no, I'm listening. Go on.",
-}
-
 local NAMES = { "RootJoint", "Neck", "Left Shoulder", "Right Shoulder", "Left Hip", "Right Hip" }
 
 type Rig = {
@@ -133,37 +120,6 @@ local function tyreFor(rig: Rig)
 	end
 	m.Parent = workspace
 	rig.tyre = m
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "BenchBubble"
-	gui.Size = UDim2.fromOffset(230, 56)
-	gui.StudsOffsetWorldSpace = Vector3.new(0, 2.6, 0)
-	gui.MaxDistance = 60
-	gui.AlwaysOnTop = false
-	local tl = Instance.new("TextLabel")
-	tl.Size = UDim2.fromScale(1, 1)
-	tl.BackgroundColor3 = Color3.fromRGB(250, 246, 236)
-	tl.TextColor3 = Color3.fromRGB(40, 34, 30)
-	tl.Font = Enum.Font.GothamMedium
-	tl.TextScaled = true
-	tl.TextWrapped = true
-	tl.Text = ""
-	tl.Parent = gui
-	local pad = Instance.new("UIPadding")
-	pad.PaddingLeft, pad.PaddingRight = UDim.new(0, 10), UDim.new(0, 10)
-	pad.PaddingTop, pad.PaddingBottom = UDim.new(0, 6), UDim.new(0, 6)
-	pad.Parent = tl
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 14)
-	corner.Parent = tl
-	local lim = Instance.new("UITextSizeConstraint")
-	lim.MaxTextSize = 18
-	lim.Parent = tl
-	gui.Adornee = rig.char:FindFirstChild("Head") :: BasePart?
-	gui.Enabled = false
-	gui.Parent = rig.char
-	rig.bubble = gui
-	rig.line = math.random(1, #LINES)
-	rig.nextLine = os.clock() + 1.2
 end
 
 local function attach(char: Model)
@@ -212,24 +168,12 @@ local function step()
 		set("Left Shoulder", p.la, Vector3.new(-1, 0.5, 0))
 		set("Right Hip", p.rl.r, Vector3.new(1, -1, 0), p.rl.up)
 		set("Left Hip", p.ll.r, Vector3.new(-1, -1, 0), p.ll.up)
-		-- the tyre beside you, on its tread, nodding along between your lines
+		-- the tyre beside you, on its tread, nodding along (no speech bubble: the animation says it)
 		local root = rig.hum.RootPart
 		if rig.tyre and root then
 			local nod = math.max(0, math.sin(t * 2.2)) ^ 6 * 0.25
 			local cf = root.CFrame * CFrame.new(2.75, -1.5 + 1.15 + nod * 0.4, -0.25) * A(0, -0.35, 0) * A(0, 0, nod * 0.6)
 			rig.tyre:PivotTo(cf * CFrame.Angles(0, 0.5, 0))   -- its face toward you, turned a little to the front
-		end
-		if rig.bubble and now >= rig.nextLine then
-			local tl = rig.bubble:FindFirstChildOfClass("TextLabel")
-			if rig.bubble.Enabled then
-				rig.bubble.Enabled = false
-				rig.nextLine = now + 2.4
-			else
-				rig.line = rig.line % #LINES + 1
-				if tl then tl.Text = LINES[rig.line] end
-				rig.bubble.Enabled = true
-				rig.nextLine = now + 4.2
-			end
 		end
 	end
 end
