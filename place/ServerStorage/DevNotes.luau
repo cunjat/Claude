@@ -28,7 +28,12 @@ local DONE = [[
             1850-2700 out: Backroad tree stands, Dunes ridges; wrap forward, rebuilt per zone). HUB: rock pigeon from
             TC_HubProps (Park/Pigeon RockPigeon, or built from the import), on its feet, not darkened; a flock on the plaza's
             rangoli ring. tools/file_assets.luau files the pigeon. GOALS: Stage Trials harder (targets up, 8%/prestige,
-            misses ease 4% to 75%).
+            misses ease 4% to 75%; a trial saved before never gets harder). SYSTEMS CHECK: YardEdit (prestige refits the
+            layout to stage 1 via Game.yardFit, server + on join; machines go red on decor; held piece follows the pointer
+            while the view drifts; footprint clamped to the floor; panels Active; one touch moves things; one save at a
+            time; turns never spin the long way; Z / Ctrl+Z undo, 40 steps). Workbench (swatches fit, outline follows the
+            grabbed copy, fused-away tyre falls back to launch, paint keeps cut-outs and restores colour, NaN-safe Design,
+            stickers capped at MaxPerTyre). Shift lock frees the mouse over any open panel.
 2026-10-24  owner's Claude (session 6)  PRE-RELEASE FIXES + HUB PACK 6 FILED. Pack 6 (Import 3D "Scene") filed into
             Assets Park/Nature/Vehicles2 (old ones in ServerStorage.ArchivedAssets.Replaced_2026-10-24); LobbyTraffic LAMPS
             (heights over the axle); LobbyPark pigeon scale 1.15 + wing/tail hinges from the new parts, dog casts shadow.
