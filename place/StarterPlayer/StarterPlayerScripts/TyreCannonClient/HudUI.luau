@@ -594,9 +594,9 @@ end
 -- stamps and toasts
 --==============================================================
 -- a big word that slams in tilted, holds and lifts away
-function HudUI:stamp(text: string, color: Color3, size: number, rot: number?, sub: string?)
+function HudUI:stamp(text: string, color: Color3, size: number, rot: number?, sub: string?, dy: number?)
 	local holder = UI.mk("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, -10), Size = UDim2.fromOffset(640, size + 30),
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, -10 + (dy or 0)), Size = UDim2.fromOffset(640, size + 30),
 		BackgroundTransparency = 1, ZIndex = 21, Rotation = rot or 0, Parent = self.toasts,
 	})
 	local l = Kit.text(text, size, color, 3.5, ITALIC)
@@ -688,7 +688,8 @@ function HudUI:event(e)
 		elseif e.what == "bonus" then
 			self.shownChain = e.chain
 			self:setChain(e.chain, e.combo)
-			self:stamp("SKILL ZONE", PERFECT, 44, 0, e.name)
+			-- (the skill's own name was just stamped; this one goes over the top of it, not on it)
+			self:stamp("SKILL ZONE", PERFECT, 40, 0, e.name, -70)
 		end
 	elseif k == "smooth" then
 		self.shownChain = e.chain

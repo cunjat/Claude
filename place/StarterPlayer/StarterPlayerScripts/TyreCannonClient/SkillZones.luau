@@ -93,12 +93,12 @@ function SkillZones:build(zone)
 		part(f, Vector3.new(3, 3, w * 2 + 3), CFrame.new(x, y + 46, 0), col, Enum.Material.Neon, 0.1)
 	end
 	-- the band down the road between them, slab by slab
-	local SEG = 20
+	local SEG = 10
 	local x = zone.x0
 	while x < zone.x1 do
 		local x2 = math.min(zone.x1, x + SEG)
-		local a = Vector3.new(x, track:heightAt(x) + 0.35, 0)
-		local b = Vector3.new(x2, track:heightAt(x2) + 0.35, 0)
+		local a = Vector3.new(x, track:heightAt(x) + 0.6, 0)
+		local b = Vector3.new(x2, track:heightAt(x2) + 0.6, 0)
 		local mid = (a + b) / 2
 		local len = (b - a).Magnitude
 		part(f, Vector3.new(len + 0.4, 0.2, w * 2), CFrame.lookAt(mid, b) * CFrame.Angles(0, math.pi / 2, 0), col, Enum.Material.Neon, 0.78)
@@ -106,13 +106,15 @@ function SkillZones:build(zone)
 	end
 	-- an updraft: golden motes rising the length of the zone
 	if self.kind == "air" then
-		local mid = (zone.x0 + zone.x1) / 2
-		local base = part(f, Vector3.new(zone.x1 - zone.x0, 1, w * 2), CFrame.new(mid, track:heightAt(mid) + 2, 0), col, Enum.Material.Neon, 1)
+		-- (a run of short emitters along the ground, so the motes rise off the road all the way)
+		for k = 0, 5 do
+		local mid = zone.x0 + (k + 0.5) * (zone.x1 - zone.x0) / 6
+		local base = part(f, Vector3.new((zone.x1 - zone.x0) / 6, 1, w * 2), CFrame.new(mid, track:heightAt(mid) + 2, 0), col, Enum.Material.Neon, 1)
 		local pe = Instance.new("ParticleEmitter")
 		pe.Texture = "rbxasset://textures/particles/sparkles_main.dds"
 		pe.Color = ColorSequence.new(col)
 		pe.LightEmission = 1
-		pe.Rate = 90
+		pe.Rate = 15
 		pe.Lifetime = NumberRange.new(2.5, 4)
 		pe.Speed = NumberRange.new(40, 70)
 		pe.EmissionDirection = Enum.NormalId.Top
@@ -120,12 +122,13 @@ function SkillZones:build(zone)
 		pe.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 2.4), NumberSequenceKeypoint.new(1, 0.4) })
 		pe.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1) })
 		pe.Parent = base
+		end
 	end
 	-- the sign at the entry
 	local y0 = track:heightAt(zone.x0)
 	local anchor = part(f, Vector3.new(1, 1, 1), CFrame.new(zone.x0, y0 + 58, 0), col, Enum.Material.Neon, 1)
 	local bb = Instance.new("BillboardGui")
-	bb.Size = UDim2.fromOffset(420, 96)
+	bb.Size = UDim2.fromScale(70, 16)    -- (in studs: it shrinks with distance like the arch it's on)
 	bb.AlwaysOnTop = false
 	bb.LightInfluence = 0
 	bb.MaxDistance = 1400
