@@ -34,24 +34,32 @@ function TyreLook.model(tyreId: string?, diameter: number, name: string?, design
 		if design then TyreLook.dress(m, design) end
 		return m
 	end
-	return WheelAssembly.build(nil, { diameter = diameter, skin = "stock", rim = "steel", detail = "high", name = name or "Tyre" })
+	local m = WheelAssembly.build(nil, { diameter = diameter, skin = "stock", rim = "steel", detail = "high", name = name or "Tyre" })
+	if design then TyreLook.dress(m, design) end
+	return m
 end
 
 function TyreLook.paint(model: Model, color: Color3?)
 	for _, d in ipairs(model:GetDescendants()) do
 		if d:IsA("SurfaceAppearance") and not (d.Parent and d.Parent.Name == "Sticker") then
-			-- (only touched while painted: a tyre's own alpha mode, cut-outs and all, comes back unpainted)
-			pcall(function()
-				if color then
-					if d:GetAttribute("BaseAlphaMode") == nil then d:SetAttribute("BaseAlphaMode", d.AlphaMode.Name) end
-					d.AlphaMode = Enum.AlphaMode.TintMask
-					d.Color = color
-				elseif d:GetAttribute("BaseAlphaMode") ~= nil then
-					d.AlphaMode = (Enum.AlphaMode :: any)[d:GetAttribute("BaseAlphaMode")]
-					d.Color = Color3.new(1, 1, 1)
-					d:SetAttribute("BaseAlphaMode", nil)
+			-- (only touched while painted: its own alpha mode and colour come back unpainted, and a
+			-- surface with cut-outs (Transparency) keeps them: it's only tinted)
+			if color then
+				if d:GetAttribute("BaseAlphaMode") == nil then
+					d:SetAttribute("BaseAlphaMode", d.AlphaMode.Name)
+					d:SetAttribute("BaseColor", d.Color)
 				end
-			end)
+				if d.AlphaMode ~= Enum.AlphaMode.Transparency then
+					pcall(function() d.AlphaMode = Enum.AlphaMode.TintMask end)
+				end
+				pcall(function() d.Color = color end)
+			elseif d:GetAttribute("BaseAlphaMode") ~= nil then
+				pcall(function() d.AlphaMode = (Enum.AlphaMode :: any)[d:GetAttribute("BaseAlphaMode")] end)
+				local base = d:GetAttribute("BaseColor")
+				pcall(function() d.Color = if typeof(base) == "Color3" then base else Color3.new(1, 1, 1) end)
+				d:SetAttribute("BaseAlphaMode", nil)
+				d:SetAttribute("BaseColor", nil)
+			end
 		end
 	end
 end

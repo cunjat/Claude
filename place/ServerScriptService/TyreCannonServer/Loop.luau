@@ -1083,9 +1083,15 @@ function Loop.init(S)
 		-- only the fields the Tyre Studio uses, clamped; sidewall text is filtered for everyone else
 		-- (2026-10-24: paint's RimPrimary is the tyre's tint in the Customization tab; smoke is the
 		-- colour of its dust and tread smoke in a run; a sticker can carry a tint, col)
+		-- (a number, never NaN, which would poison the save)
+		local function num(x: any, default: number): number
+			local n = tonumber(x)
+			if n == nil or n ~= n then return default end
+			return n
+		end
 		local function rgb(c: any): { number }?
 			if type(c) ~= "table" or #c ~= 3 then return nil end
-			return { math.clamp(tonumber(c[1]) or 0, 0, 1), math.clamp(tonumber(c[2]) or 0, 0, 1), math.clamp(tonumber(c[3]) or 0, 0, 1) }
+			return { math.clamp(num(c[1], 0), 0, 1), math.clamp(num(c[2], 0), 0, 1), math.clamp(num(c[3], 0), 0, 1) }
 		end
 		local clean = { paint = {}, finish = {}, stickers = {}, text = "", smoke = rgb(design.smoke) }
 		if type(design.paint) == "table" then
@@ -1108,15 +1114,15 @@ function Loop.init(S)
 		end
 		if type(design.stickers) == "table" then
 			for _, s in ipairs(design.stickers) do
-				if #clean.stickers >= 16 then break end
+				if #clean.stickers >= (Config.Stickers and Config.Stickers.MaxPerTyre or 8) then break end
 				if type(s) == "table" and type(s.id) == "string" then
 					table.insert(clean.stickers, {
 						id = s.id:sub(1, 40),
-						a = math.clamp(tonumber(s.a) or 0, -360, 360),
-						r = math.clamp(tonumber(s.r) or 0.85, 0.6, 1.0),
-						rot = math.clamp(tonumber(s.rot) or 0, -360, 360),
-						size = math.clamp(tonumber(s.size) or 1, 0.3, 2.5),
-						repeatN = math.clamp(math.floor(tonumber(s.repeatN) or 1), 1, 6),
+						a = math.clamp(num(s.a, 0), -360, 360),
+						r = math.clamp(num(s.r, 0.85), 0.6, 1.0),
+						rot = math.clamp(num(s.rot, 0), -360, 360),
+						size = math.clamp(num(s.size, 1), 0.3, 2.5),
+						repeatN = math.clamp(math.floor(num(s.repeatN, 1)), 1, 6),
 						mirror = s.mirror == true,
 						col = rgb(s.col),
 					})

@@ -374,20 +374,26 @@ function Workbench:buildStickers(page: Frame)
 		readout.Size = UDim2.fromOffset(52, 34)
 		readout.ZIndex = 8
 		readout.Parent = self.controls
-		local s, show = Kit.slider(138, 0, function(t)
+		local show: ((number) -> ())? = nil
+		local s, show0 = Kit.slider(138, 0, function(t)
 			local s0 = self.stickers[self.selSticker or 0]
 			if not s0 then return end
 			local val = lo + (hi - lo) * t
-			if step then val = math.floor(val / step + 0.5) * step end
+			if step then
+				val = math.floor(val / step + 0.5) * step
+				-- (the knob settles on the step too)
+				if show then show((val - lo) / (hi - lo)) end
+			end
 			s0[key] = val
 			readout.Text = fmt(val)
 			self:redress()
 		end, C.orange)
+		show = show0
 		s.Position = UDim2.fromOffset(88, y)
 		s.ZIndex = 8
 		s.Parent = self.controls
 		return function(val: number)
-			show((val - lo) / (hi - lo))
+			show0((val - lo) / (hi - lo))
 			readout.Text = fmt(val)
 		end
 	end
@@ -404,11 +410,12 @@ function Workbench:buildStickers(page: Frame)
 	cl.Size = UDim2.fromOffset(86, 28)
 	cl.ZIndex = 8
 	cl.Parent = self.controls
-	self.stickerSwatches = self:swatchRow(self.controls, UDim2.fromOffset(88, 172), 26, STICKER_TINTS, function(c)
+	self.stickerSwatches = self:swatchRow(self.controls, UDim2.fromOffset(88, 172), 22, STICKER_TINTS, function(c)
 		local s0 = self.stickers[self.selSticker or 0]
 		if not s0 then return end
 		s0.col = if c then { c.R, c.G, c.B } else nil
 		self:redress()
+		self:refreshStickerUI()   -- (its chip takes the colour too)
 	end)
 	local bl = Kit.text("Both sides", 15, C.text, 2, Kit.Body)
 	bl.TextXAlignment = Enum.TextXAlignment.Left
@@ -434,16 +441,17 @@ function Workbench:buildStickers(page: Frame)
 		l.TextXAlignment = Enum.TextXAlignment.Left
 		l.Position = UDim2.fromOffset(2, y)
 		l.Size = UDim2.fromOffset(280, 18)
+		Kit.fit(l, 15, 10)
 		l.ZIndex = 8
 		l.Parent = self.tyrePanel
 	end
-	caption("PAINT   ·   rims and walls take it, rubber stays black", 0)
+	caption("PAINT  ·  rims and walls", 0)
 	self.paintSwatches = self:swatchRow(self.tyrePanel, UDim2.fromOffset(0, 22), 34, PAINTS, function(c)
 		self.paint = c
 		self.dirty = true
 		self:redress()
 	end, 7)
-	caption("SMOKE   ·   your dust and tread smoke in a run", 106)
+	caption("SMOKE  ·  your dust in a run", 106)
 	self.smokeSwatches = self:swatchRow(self.tyrePanel, UDim2.fromOffset(0, 128), 34, SMOKES, function(c)
 		self.smoke = c
 		self.dirty = true
@@ -464,13 +472,14 @@ function Workbench:buildStickers(page: Frame)
 		self:removeSticker()
 		self:renderCatalogue()
 	end
-	local clear = Kit.button("Clear all", C.grey, UDim2.fromOffset(86, 44), 15)
+	local clear = Kit.button("Clear", C.grey, UDim2.fromOffset(86, 44), 15)
 	clear.root.Position = UDim2.fromOffset(92, 412)
 	clear.root.ZIndex = 8
 	clear.root.Parent = right
 	clear.onClick = function()
 		self.stickers = {}
 		self.selSticker = nil
+		self.dragCopy = 0
 		self.dirty = true
 		self:setEditing(false)
 		self:redress()
@@ -544,6 +553,7 @@ function Workbench:addSticker(id: string)
 	end
 	table.insert(self.stickers, { id = id, a = 0, r = 0.82, rot = 0, size = 1, mirror = false })
 	self.selSticker = #self.stickers
+	self.dragCopy = 0
 	self.dirty = true
 	self:setEditing(true)
 	self:redress()
@@ -555,6 +565,7 @@ function Workbench:removeSticker()
 	if not i or not self.stickers[i] then return end
 	table.remove(self.stickers, i)
 	self.selSticker = nil
+	self.dragCopy = 0
 	self.dirty = true
 	self:setEditing(false)
 	self:redress()
@@ -734,7 +745,7 @@ function Workbench:buildStickerPad()
 		if not p then return end
 		local radius = TyreSticker.surface(m)
 		local n = math.clamp(math.floor(tonumber(s0.repeatN) or 1), 1, 6)
-		local a = math.deg(math.atan2(p.X, p.Y)) - (self.dragCopy or 0) * 360 / n
+		local a = math.deg(math.atan2(p.X, p.Y)) - ((self.dragCopy or 0) % n) * 360 / n
 		s0.a = (a + 180) % 360 - 180
 		s0.r = math.clamp(Vector2.new(p.X, p.Y).Magnitude / math.max(radius, 0.1), 0.6, 1.0)
 		self.setA(s0.a)
@@ -855,7 +866,9 @@ end
 function Workbench:placeOutline()
 	local ring = self.outline
 	if not ring then return end
-	local box = self.tab == "stickers" and self.stand.isEditing() and self.selSticker and self:stickerBox(self.selSticker, self.dragCopy) or nil
+	local s0 = self.stickers[self.selSticker or 0]
+	local copy = if s0 then (self.dragCopy or 0) % math.clamp(math.floor(tonumber(s0.repeatN) or 1), 1, 6) else 0
+	local box = self.tab == "stickers" and self.stand.isEditing() and self.selSticker and self:stickerBox(self.selSticker, copy) or nil
 	if not box then
 		ring.Visible = false
 		return
@@ -914,7 +927,7 @@ function Workbench:refreshStickerUI()
 		if e then
 			UI.mk("ImageLabel", {
 				AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(1, -12, 1, -12), BackgroundTransparency = 1,
-				Image = e.texture, ScaleType = Enum.ScaleType.Fit, ZIndex = 10, Parent = b,
+				Image = e.texture, ImageColor3 = TyreSticker.color(s.col) or Color3.new(1, 1, 1), ScaleType = Enum.ScaleType.Fit, ZIndex = 10, Parent = b,
 			})
 		end
 		b.Activated:Connect(function()
@@ -1009,6 +1022,7 @@ function Workbench:select(uid: number)
 	self.paint = design and type(design.paint) == "table" and TyreSticker.color(design.paint.RimPrimary) or nil
 	self.smoke = design and TyreSticker.color(design.smoke) or nil
 	self.selSticker = nil
+	self.dragCopy = 0
 	if self.tab == "stickers" then self:setEditing(false) end
 	local m = self.stand.model()
 	if m then
@@ -1076,7 +1090,12 @@ function Workbench:open()
 	local v = self.profile and self.profile.v2
 	self:setTab("tyres")
 	if v then
-		self:select(self.sel or v.launch)
+		-- (a tyre fused away since: back to the launch tyre)
+		local have = false
+		for _, e in ipairs(v.inv) do
+			if e.uid == self.sel then have = true end
+		end
+		self:select(if have then self.sel else v.launch)
 		self:renderGrid()
 	end
 end

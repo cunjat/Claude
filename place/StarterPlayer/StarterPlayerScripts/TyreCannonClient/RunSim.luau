@@ -1159,7 +1159,7 @@ function RunSim:step(dt: number)
 				self.nitro = math.min(self.nitroMax, self.nitro + F.SkimNitro)
 				self.perfects += 1
 				self:link()
-				PackFX.burst("dustRing", CFrame.new(self.x, self.y - R + 0.5, self.z), 6, self.track:cfgAt(self.x).ground:Lerp(Color3.new(1, 1, 1), 0.3), 0.9)
+				PackFX.burst("dustRing", CFrame.new(self.x, self.y - R + 0.5, self.z), 6, self.smokeCol or self.track:cfgAt(self.x).ground:Lerp(Color3.new(1, 1, 1), 0.3), 0.9)
 				self.onEvent({ kind = "skim", chain = self.chain, combo = self.combo })
 			end
 		else
