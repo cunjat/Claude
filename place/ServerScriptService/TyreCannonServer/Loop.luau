@@ -615,7 +615,8 @@ function Loop.init(S)
 			else
 				-- a run that falls short makes the next try a little easier
 				trial.tries = (trial.tries or 0) + 1
-				trial.t = Goals.trial(v.pres, v.tier, trial.tries, Game.perkLv(v, "trials")).t
+				-- (never above what it was: a trial saved before the targets went up keeps its old target)
+				trial.t = math.min(trial.t or math.huge, Goals.trial(v.pres, v.tier, trial.tries, Game.perkLv(v, "trials")).t)
 			end
 		end
 		if not short then questAdd(player, v, "runs", 1) end
@@ -991,7 +992,7 @@ function Loop.init(S)
 			local head = math.min(Game.perkLv(v, "headstart"), Game.LevelsPerTier - 1)
 			for _, mid in ipairs(Game.Overhaul.Machines) do v.mach[mid] = math.max(v.mach[mid] or 0, head) end
 		elseif id == "trials" and v.trial and not v.trial.done then
-			v.trial.t = Goals.trial(v.pres, v.tier, v.trial.tries or 0, Game.perkLv(v, "trials")).t
+			v.trial.t = math.min(v.trial.t or math.huge, Goals.trial(v.pres, v.tier, v.trial.tries or 0, Game.perkLv(v, "trials")).t)
 		end
 		restyle(player, v)
 		Analytics.custom(player, "PerkPicked", v.perks[id], { [Enum.AnalyticsCustomFieldKeys.CustomField01.Name] = id })

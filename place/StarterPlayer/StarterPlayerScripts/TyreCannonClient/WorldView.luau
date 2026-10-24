@@ -500,7 +500,7 @@ function WorldView:buildRing()
 			local piece = {
 				x = (i - 1) / perSide * RING_LOOP - 2400 + r:NextNumber(-140, 140),
 				z = side * r:NextNumber(RING_NEAR, RING_FAR),
-				side = side, seed = r:NextInteger(1, 1e6), model = nil :: Model?, kind = nil :: string?,
+				side = side, seed = r:NextInteger(1, 1e6), model = nil :: Model?, kind = nil :: string?, queued = true,
 			}
 			table.insert(self.ring, piece)
 			table.insert(self.ringQueue, piece)
@@ -510,6 +510,7 @@ end
 
 -- one piece of the far ring at its place: a stand of three or four tall trees, or one dune ridge
 function WorldView:makeRingPiece(piece)
+	piece.queued = false
 	if piece.model then
 		piece.model:Destroy()
 		piece.model = nil
@@ -519,13 +520,15 @@ function WorldView:makeRingPiece(piece)
 	local r = Random.new(piece.seed + math.floor(piece.x))
 	local m = Instance.new("Model")
 	m.Name = "RingPiece"
-	local function stand(path: string, dx: number, dz: number, height: number, yaw: number, tint: Color3?)
+	local function stand(path: string, dx: number, dz: number, height: number, yaw: number, tint: Color3?, alongRoad: boolean?)
 		local tpl = Models.get("Scenery/" .. path)
 		if not tpl then return end
 		local t = Models.place(tpl, m, CFrame.new(), 1)
 		local _, size = t:GetBoundingBox()
 		if size.Y > 0.01 then t:ScaleTo(t:GetScale() * height / size.Y) end
 		local cf, sz = t:GetBoundingBox()
+		-- (a ridge lies with its length along the road, whichever axis the model was built along)
+		if alongRoad and sz.Z > sz.X then yaw += math.pi / 2 end
 		local gx, gz = piece.x + dx, piece.z + dz
 		local ground = self.track:baseHeight(math.max(0, gx)) - LAND_SINK
 		t:PivotTo(CFrame.new(gx, ground + (t:GetPivot().Position.Y - (cf.Position.Y - sz.Y / 2)) - 2, gz)
@@ -542,7 +545,8 @@ function WorldView:makeRingPiece(piece)
 		-- a ridge many times the size of the roadside ones, paler the further out it lies
 		local far = (math.abs(piece.z) - RING_NEAR) / (RING_FAR - RING_NEAR)
 		local tint = Color3.fromRGB(255, 236, 214):Lerp(Color3.fromRGB(236, 226, 220), far)
-		stand("dunes/DuneRidge", 0, 0, r:NextNumber(140, 260), r:NextNumber(-0.3, 0.3) + (if piece.side > 0 then 0 else math.pi), tint)
+		-- (its slip face to the road, as the roadside ridges lie)
+		stand("dunes/DuneRidge", 0, 0, r:NextNumber(140, 260), r:NextNumber(-0.3, 0.3) + (if piece.side > 0 then math.pi else 0), tint, true)
 	else
 		local n = r:NextInteger(3, 4)
 		local pick = RING_TREES[r:NextInteger(1, #RING_TREES)]
@@ -2245,10 +2249,14 @@ function WorldView:update(dt: number, tyreX: number)
 	end
 	if self.ring then
 		-- carried round to the front as they fall behind (rebuilt there for the zone ahead)
+		-- (all the way round in one go when the tyre starts far down the road, and queued once)
 		for _, piece in ipairs(self.ring) do
 			if piece.x < tyreX - 2600 then
-				piece.x += RING_LOOP
-				table.insert(self.ringQueue, piece)
+				while piece.x < tyreX - 2600 do piece.x += RING_LOOP end
+				if not piece.queued then
+					piece.queued = true
+					table.insert(self.ringQueue, piece)
+				end
 			end
 		end
 		-- a few built a frame, nearest the tyre first

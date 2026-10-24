@@ -1686,8 +1686,12 @@ local function pigeonTemplate(): Instance?
 	if filed and filed:GetAttribute("RockPigeon") then return filed end
 	if rockPigeon then return rockPigeon end
 	local props = workspace:FindFirstChild("TC_HubProps")
-	local body = props and props:FindFirstChild("Pigeon__Body")
-	if body and body:IsA("BasePart") then
+	-- (only once all three of its parts have streamed in; until then the filed bird)
+	local ready = props ~= nil
+	for _, n in ipairs({ "Body", "WingL", "WingR" }) do
+		if ready and not (props :: Instance):FindFirstChild("Pigeon__" .. n) then ready = false end
+	end
+	if ready then
 		local m = Instance.new("Model")
 		m.Name = "Pigeon"
 		for _, n in ipairs({ "Body", "WingL", "WingR" }) do
@@ -1743,7 +1747,9 @@ function LobbyPark:flock(centre: Vector3, n: number, spread: number)
 			local a, r = rng:NextNumber(0, 6.28), rng:NextNumber(2, spread)
 			local p = centre + Vector3.new(math.cos(a) * r, 0, math.sin(a) * r)
 			local far = not avoid or (flat(p) - flat(avoid)).Magnitude > 16
-			if far and (self:clear(p, 0) or math.abs((flat(p) - CENTRE).Magnitude - PATH_R) < PATH_W) then return p end
+			-- (never inside the trophy pillar's steps at the hub's centre)
+			local onSteps = math.max(math.abs(p.X - CENTRE.X), math.abs(p.Z - CENTRE.Z)) < 24.5
+			if far and not onSteps and (self:clear(p, 0) or math.abs((flat(p) - CENTRE).Magnitude - PATH_R) < PATH_W) then return p end
 		end
 		return centre
 	end
@@ -1819,8 +1825,9 @@ function LobbyPark:critters()
 		local a = math.rad(deg)
 		return Vector3.new(CENTRE.X + math.cos(a) * r, PLAZA_TOP, CENTRE.Z + math.sin(a) * r)
 	end
-	self:flock(plaza(-45, 28), if self.counts.busy then 7 else 5, 6)
-	if self.counts.busy then self:flock(plaza(200, 27), 5, 5) end
+	-- (on the square's axes, clear of the trophy pillar's steps: the widest is 46 across)
+	self:flock(plaza(0, 30), if self.counts.busy then 7 else 5, 4)
+	if self.counts.busy then self:flock(plaza(180, 30), 5, 4) end
 	if self.counts.busy then
 		self:flock(gp(3, 500, -26), 8, 12) -- by the fountain's benches
 		self:flock(gp(0, 470, 30), 6, 10)  -- on the path by the big pond

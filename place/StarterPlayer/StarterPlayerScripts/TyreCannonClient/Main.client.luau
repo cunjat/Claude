@@ -1205,6 +1205,8 @@ task.spawn(function()
 		Preload = require(script.Parent:WaitForChild("Preload")) :: any
 		playerGui:SetAttribute("LoadStages", #Preload.Stages)
 		Preload.run(gui, function(index: number, name: string, k: number, n: number?, of: number?)
+			-- (the last stage stops just short of the end: the interface's own images close the bar)
+			if index == #Preload.Stages then k *= 0.95 end
 			playerGui:SetAttribute("LoadStage", index)
 			playerGui:SetAttribute("LoadStageName", name)
 			playerGui:SetAttribute("LoadStageK", k)
@@ -1248,6 +1250,7 @@ task.spawn(function()
 	-- reports in would otherwise hold every join for the full limit)
 	local lastCount, lastMove = math.huge, os.clock()
 	playerGui:SetAttribute("LoadStageK", 0.95)    -- (the bar holds just short of the end meanwhile)
+	playerGui:SetAttribute("LoadStageCount", "")
 	while os.clock() - t1 < 15 and os.clock() - lastMove < 3 do
 		local waiting = 0
 		for _, d in ipairs(playerGui:GetDescendants()) do
