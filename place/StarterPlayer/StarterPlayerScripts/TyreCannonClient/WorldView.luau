@@ -335,7 +335,10 @@ function WorldView.new(trackId: string, parent: Instance?, opts: { [string]: any
 	if not self.sceneryOnly or self.backdrop then
 		self:buildApron()
 		self:buildHorizon()
-		if self.track.isRoad then self:buildSkirt() end
+		if self.track.isRoad then
+			self:buildSkirt()
+			self:buildRing()
+		end
 	end
 	-- the road's zones each bring their own light, grade, haze and air
 	if self.track.isRoad and (not self.sceneryOnly or self.backdrop) then self.look = ZoneLook.new() end
@@ -468,6 +471,91 @@ function WorldView:buildHorizon()
 		self.hills[i] = hill
 		self:placeHill(hill)
 	end
+end
+
+-- the far ring (2026-10-24): big shapes about 1850-2700 studs out either side, past where the
+-- roadside scenery stops and in front of the hazy hills: tree lines on the Backroad and the Highway,
+-- huge dune ridges in the Dunes. Like the hills they're real scenery that slides past, and the ones
+-- left behind are carried round to the front, each rebuilt for the zone it lands in (so the tree
+-- lines give way to dunes as the Dunes come up). Built a few at a time, never all on one frame.
+local RING_LOOP = 9000
+local RING_NEAR, RING_FAR = 1850, 2700
+local RING_TREES = { "backroad/Poplar", "backroad/Safeda", "backroad/Birch", "backroad/Oak" }
+function WorldView:ringKind(x: number): string
+	local cfg = self:cfgAt(math.max(0, x))
+	return if cfg and cfg.id == "dunes" then "dunes" else "trees"
+end
+function WorldView:buildRing()
+	local folder = Instance.new("Folder")
+	folder.Name = "FarRing"
+	folder.Parent = self.root
+	self.ringFolder = folder
+	self.ring = {}
+	self.ringQueue = {}
+	local r = Random.new(self.track.runSeed * 977 + 41)
+	self.ringRng = r
+	local perSide = 22
+	for side = -1, 1, 2 do
+		for i = 1, perSide do
+			local piece = {
+				x = (i - 1) / perSide * RING_LOOP - 2400 + r:NextNumber(-140, 140),
+				z = side * r:NextNumber(RING_NEAR, RING_FAR),
+				side = side, seed = r:NextInteger(1, 1e6), model = nil :: Model?, kind = nil :: string?,
+			}
+			table.insert(self.ring, piece)
+			table.insert(self.ringQueue, piece)
+		end
+	end
+end
+
+-- one piece of the far ring at its place: a stand of three or four tall trees, or one dune ridge
+function WorldView:makeRingPiece(piece)
+	if piece.model then
+		piece.model:Destroy()
+		piece.model = nil
+	end
+	local kind = self:ringKind(piece.x)
+	piece.kind = kind
+	local r = Random.new(piece.seed + math.floor(piece.x))
+	local m = Instance.new("Model")
+	m.Name = "RingPiece"
+	local function stand(path: string, dx: number, dz: number, height: number, yaw: number, tint: Color3?)
+		local tpl = Models.get("Scenery/" .. path)
+		if not tpl then return end
+		local t = Models.place(tpl, m, CFrame.new(), 1)
+		local _, size = t:GetBoundingBox()
+		if size.Y > 0.01 then t:ScaleTo(t:GetScale() * height / size.Y) end
+		local cf, sz = t:GetBoundingBox()
+		local gx, gz = piece.x + dx, piece.z + dz
+		local ground = self.track:baseHeight(math.max(0, gx)) - LAND_SINK
+		t:PivotTo(CFrame.new(gx, ground + (t:GetPivot().Position.Y - (cf.Position.Y - sz.Y / 2)) - 2, gz)
+			* CFrame.Angles(0, yaw, 0))
+		for _, d in ipairs(t:GetDescendants()) do
+			if d:IsA("BasePart") then
+				d.CastShadow = false
+			elseif tint and d:IsA("SurfaceAppearance") then
+				d.Color = tint
+			end
+		end
+	end
+	if kind == "dunes" then
+		-- a ridge many times the size of the roadside ones, paler the further out it lies
+		local far = (math.abs(piece.z) - RING_NEAR) / (RING_FAR - RING_NEAR)
+		local tint = Color3.fromRGB(255, 236, 214):Lerp(Color3.fromRGB(236, 226, 220), far)
+		stand("dunes/DuneRidge", 0, 0, r:NextNumber(140, 260), r:NextNumber(-0.3, 0.3) + (if piece.side > 0 then 0 else math.pi), tint)
+	else
+		local n = r:NextInteger(3, 4)
+		local pick = RING_TREES[r:NextInteger(1, #RING_TREES)]
+		for k = 1, n do
+			stand(pick, r:NextNumber(-130, 130), r:NextNumber(-90, 90), r:NextNumber(90, 150), r:NextNumber(0, math.pi * 2))
+		end
+	end
+	if #m:GetChildren() == 0 then
+		m:Destroy()
+		return
+	end
+	m.Parent = self.ringFolder
+	piece.model = m
 end
 
 -- the ground out to the horizon, under everything: big tiles that ride along with the tyre, so
@@ -2152,6 +2240,24 @@ function WorldView:update(dt: number, tyreX: number)
 			if hill.x < tyreX - 2600 then
 				hill.x += HORIZON_LOOP
 				self:placeHill(hill)
+			end
+		end
+	end
+	if self.ring then
+		-- carried round to the front as they fall behind (rebuilt there for the zone ahead)
+		for _, piece in ipairs(self.ring) do
+			if piece.x < tyreX - 2600 then
+				piece.x += RING_LOOP
+				table.insert(self.ringQueue, piece)
+			end
+		end
+		-- a few built a frame, nearest the tyre first
+		local q = self.ringQueue
+		if #q > 0 then
+			table.sort(q, function(a, b) return math.abs(a.x - tyreX) < math.abs(b.x - tyreX) end)
+			for _ = 1, math.min(3, #q) do
+				local piece = table.remove(q, 1)
+				pcall(function() self:makeRingPiece(piece) end)
 			end
 		end
 	end
