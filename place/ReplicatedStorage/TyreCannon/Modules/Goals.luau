@@ -5,7 +5,9 @@
 --                 cash: land PERFECTs, stay in the air, smash things, grab coins, run clean, go far.
 --                 Which one comes up is fixed for each (prestige, stage), so every climb asks for
 --                 something different; a run that falls short makes the next try a little easier
---                 (never past 55% of the first target), so a trial is never a wall.
+--                 (4% a try, never past 75% of the first target), so a trial is hard but never a wall.
+--                 (2026-10-24, the owner: "make the challenges harder to rank up": higher targets
+--                 at every stage, a steeper climb with each prestige, much less given back for misses)
 --   Quests        three a day and one a week, rolled per player per day / week from the same kinds
 --                 plus things done around the yard (open crates, buy levels, like yards, decorate).
 --                 Each pays keys and a few minutes of your earnings; all three dailies, a bonus.
@@ -25,12 +27,12 @@ end
 
 -- what a run counts toward, in one run (the run's best is what counts)
 Goals.RunKinds = {
-	dist = { text = "Reach %s in one run", unit = "m", base = 2000, grow = 1.35, round = 100 },
-	perfect = { text = "Land %d PERFECTs in one run", base = 3, step = 1, round = 1 },
-	smash = { text = "Smash %d things in one run", base = 4, step = 2, round = 1 },
-	air = { text = "Stay in the air %.1f s in one jump", unit = "s", base = 2.5, step = 0.5, round = 0.1 },
-	coins = { text = "Grab %d coins in one run", base = 60, step = 25, round = 5 },
-	clean = { text = "Reach %s without hitting anything", unit = "m", base = 1200, grow = 1.35, round = 100 },
+	dist = { text = "Reach %s in one run", unit = "m", base = 2600, grow = 1.42, round = 100 },
+	perfect = { text = "Land %d PERFECTs in one run", base = 4, step = 1.5, round = 1 },
+	smash = { text = "Smash %d things in one run", base = 6, step = 3, round = 1 },
+	air = { text = "Stay in the air %.1f s in one jump", unit = "s", base = 3, step = 0.6, round = 0.1 },
+	coins = { text = "Grab %d coins in one run", base = 90, step = 35, round = 5 },
+	clean = { text = "Reach %s without hitting anything", unit = "m", base = 1600, grow = 1.42, round = 100 },
 }
 Goals.TrialOrder = { "perfect", "dist", "air", "smash", "coins", "clean" }
 
@@ -62,18 +64,18 @@ local function runTarget(kind: string, tier: number, pres: number): number
 	else
 		v = d.base + (d.step or 0) * (t - 1)
 	end
-	v *= 1 + 0.04 * math.min(pres, 25)
+	v *= 1 + 0.08 * math.min(pres, 25)
 	return roundTo(v, d.round or 1)
 end
 
 -- the trial for moving up from `tier` (tier 5: the trial before a prestige). `tries` runs have
--- fallen short (each takes 8% off, down to 55%); `easier` is the Trial Runner perk's levels.
+-- fallen short (each takes 4% off, down to 75%); `easier` is the Trial Runner perk's levels.
 function Goals.trial(pres: number, tier: number, tries: number?, easier: number?): Goal
 	local n = #Goals.TrialOrder
 	-- the same order every climb, shifted by the prestige, so no two climbs ask the same things
 	local kind = Goals.TrialOrder[((tier - 1) + pres * 2) % n + 1]
 	local base = runTarget(kind, tier, pres)
-	local k = math.max(0.55, 1 - 0.08 * (tries or 0)) * (1 - 0.1 * (easier or 0))
+	local k = math.max(0.75, 1 - 0.04 * (tries or 0)) * (1 - 0.1 * (easier or 0))
 	local d = Goals.RunKinds[kind]
 	return { k = kind, t = roundTo(base * k, d.round or 1) }
 end
