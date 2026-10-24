@@ -1677,18 +1677,52 @@ end
 --==============================================================
 -- critters (art/blender/critters.py): pigeons that scatter when you walk up, a dog by the chai stall
 --==============================================================
+-- (2026-10-24) the rock pigeon from hub props (TC_HubProps: slate grey, green neck sheen, black wing
+-- bars, pink legs). Filed as Park/Pigeon with the RockPigeon attribute; until it's filed, it's built
+-- from the import itself (Pigeon__Body / __WingL / __WingR), so the new bird shows either way
+local rockPigeon: Model? = nil
+local function pigeonTemplate(): Instance?
+	local filed = Models.get("Park/Pigeon")
+	if filed and filed:GetAttribute("RockPigeon") then return filed end
+	if rockPigeon then return rockPigeon end
+	local props = workspace:FindFirstChild("TC_HubProps")
+	local body = props and props:FindFirstChild("Pigeon__Body")
+	if body and body:IsA("BasePart") then
+		local m = Instance.new("Model")
+		m.Name = "Pigeon"
+		for _, n in ipairs({ "Body", "WingL", "WingR" }) do
+			local src = (props :: Instance):FindFirstChild("Pigeon__" .. n)
+			if src then
+				local c = src:Clone()
+				c.Name = n
+				c.Parent = m
+			end
+		end
+		m:SetAttribute("RockPigeon", true)
+		rockPigeon = m
+		return m
+	end
+	return filed
+end
+
 -- a jointed critter: its parts with their rest frames (placed at the origin) and its hinge points
 function LobbyPark:critter(name: string, scale: number): any
-	local tpl = Models.get("Park/" .. name)
+	local tpl = if name == "Pigeon" then pigeonTemplate() else Models.get("Park/" .. name)
 	if not tpl then return nil end
+	local rock = tpl:GetAttribute("RockPigeon") == true
 	local m = Models.place(tpl, self.peopleFolder, CFrame.new(), scale)
+	if rock then
+		-- (stood on its feet: the bottom of the bird on the ground, its middle over the spot)
+		local cf, size = m:GetBoundingBox()
+		m:PivotTo(m:GetPivot() + Vector3.new(-cf.Position.X, size.Y / 2 - cf.Position.Y, -cf.Position.Z))
+	end
 	local c = { parts = {}, rest = {}, s = scale }
 	for _, p in ipairs(m:GetChildren()) do
 		if p:IsA("BasePart") then
 			p.CastShadow = false
 			p.CanCollide = false
 			-- (2026-10-24, the owner: "darken all the birds")
-			if name == "Pigeon" then
+			if name == "Pigeon" and not rock then
 				-- (the 2026-10-24 textured pigeon takes its shade through its SurfaceAppearance, a touch darker)
 				local sa = p:FindFirstChildOfClass("SurfaceAppearance")
 				if sa then sa.Color = Color3.fromRGB(205, 205, 210) else p.Color = p.Color:Lerp(Color3.new(0, 0, 0), 0.4) end
@@ -1777,7 +1811,16 @@ function LobbyPark:flock(centre: Vector3, n: number, spread: number)
 end
 
 function LobbyPark:critters()
-	if not Models.get("Park/Pigeon") then return end
+	if not pigeonTemplate() then return end
+	-- the hub's centre: a flock pecking about on the plaza's rangoli ring round the trophy pillar
+	-- (clear of the benches and planters at 40 studs, across from the spawn)
+	local PLAZA_TOP = 2
+	local function plaza(deg: number, r: number): Vector3
+		local a = math.rad(deg)
+		return Vector3.new(CENTRE.X + math.cos(a) * r, PLAZA_TOP, CENTRE.Z + math.sin(a) * r)
+	end
+	self:flock(plaza(-45, 28), if self.counts.busy then 7 else 5, 6)
+	if self.counts.busy then self:flock(plaza(200, 27), 5, 5) end
 	if self.counts.busy then
 		self:flock(gp(3, 500, -26), 8, 12) -- by the fountain's benches
 		self:flock(gp(0, 470, 30), 6, 10)  -- on the path by the big pond
