@@ -17,6 +17,8 @@ local PackFX = require(script.Parent.PackFX)
 local Sound = require(script.Parent.Sound)
 
 local LaunchArcs = {}
+-- set by Main: the hub's auto-cannon readout, told what each of your shots paid
+LaunchArcs.onAutoPaid = nil :: ((number) -> ())?
 -- the yards' workers (CannonWorker), set by Main: a shot waits for its worker to press the button
 LaunchArcs.workers = nil :: any
 
@@ -92,6 +94,15 @@ function LaunchArcs.fire(plot: Instance, plot2, small: boolean?)
 	local pos = from
 	local spin = 0
 	local t = 0
+	-- the auto-cannon's shots fade out over the back half of the flight, as if into the land far off
+	local fadeFrom, fadeTo = LIFE * 0.3, LIFE * 0.7
+	local parts = {}
+	if small then
+		for _, p in ipairs(tyre:GetDescendants()) do
+			if p:IsA("BasePart") then table.insert(parts, { p = p, t = p.Transparency }) end
+		end
+	end
+	local trailRef = root and root:FindFirstChildOfClass("Trail")
 	local conn
 	conn = RunService.Heartbeat:Connect(function(dt)
 		t += dt
@@ -99,7 +110,15 @@ function LaunchArcs.fire(plot: Instance, plot2, small: boolean?)
 		pos += vel * dt
 		spin -= dt * 14
 		tyre:PivotTo(CFrame.lookAt(pos, pos + d) * CFrame.Angles(0, math.pi / 2, 0) * CFrame.Angles(0, 0, spin))
-		if t > LIFE or pos.Y < -60 then
+		if small then
+			local k = math.clamp((t - fadeFrom) / (fadeTo - fadeFrom), 0, 1)
+			k = k * k * (3 - 2 * k)
+			for _, e in ipairs(parts) do e.p.Transparency = e.t + (1 - e.t) * k end
+			if trailRef then
+				trailRef.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.4 + 0.6 * k), NumberSequenceKeypoint.new(1, 1) })
+			end
+		end
+		if t > LIFE or pos.Y < -60 or (small and t > fadeTo) then
 			conn:Disconnect()
 			tyre:Destroy()
 			live -= 1
@@ -135,8 +154,13 @@ function LaunchArcs.start(remotes: Instance, plot2, hub)
 					LaunchArcs.fire(plot, plot2, true)
 				end
 			end
-			if cash and hub and hub.toast then
-				hub:toast(("AUTO-CANNON  +$%s"):format(Game.short(cash)), Color3.fromRGB(236, 196, 120))
+			if cash then
+				-- the hub's auto-cannon readout shows the pay (the toast is the fallback)
+				if LaunchArcs.onAutoPaid then
+					LaunchArcs.onAutoPaid(cash)
+				elseif hub and hub.toast then
+					hub:toast(("AUTO-CANNON  +$%s"):format(Game.short(cash)), Color3.fromRGB(236, 196, 120))
+				end
 			end
 		end)
 	end

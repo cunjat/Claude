@@ -335,12 +335,21 @@ function Tyres2:cell(order: number, tyreId: string, forge: number, count: number
 		sweep()
 	end)
 	b.MouseLeave:Connect(function()
-		Kit.tween(holder, 0.16, { Position = UDim2.fromOffset(0, 0) })
-		Kit.tween(edge, 0.16, { ImageColor3 = base })
+		local picked = self.selCell ~= nil and self.selCell.button == b
+		Kit.tween(holder, 0.16, { Position = UDim2.fromOffset(0, if picked then -4 else 0) })
+		Kit.tween(edge, 0.16, { ImageColor3 = if picked then Kit.lift(base, 0.45) else base })
 	end)
 	b.MouseButton1Down:Connect(function() Kit.tween(holder, 0.05, { Position = UDim2.fromOffset(0, 1) }) end)
 	b.Activated:Connect(onPick)
-	local cell = { button = b, holder = holder, sel = sel, model = model, id = tyreId, forge = forge, known = known, thumb = thumb }
+	Kit.appear(holder, math.min(order, 18) * 0.018, 10)
+	sel:Destroy()
+	-- what lights up when it's picked: the edge itself (brighter, a band running round it) and a
+	-- glow of its colour behind the well
+	local glow = UI.mk("ImageLabel", {
+		Name = "SelGlow", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.new(1, 36, 1, 36),
+		BackgroundTransparency = 1, Image = Kit.Art.glow, ImageColor3 = base, ImageTransparency = 1, ZIndex = 5, Parent = holder,
+	})
+	local cell = { button = b, holder = holder, sel = glow, edge = edge, base = base, model = model, id = tyreId, forge = forge, known = known, thumb = thumb }
 	table.insert(self.cells, cell)
 	return cell
 end
@@ -362,15 +371,48 @@ function Tyres2:fillVisible()
 	end
 end
 
+-- a card lit up as the picked one (its own rarity edge brightened with a band running round it,
+-- a glow of its colour behind, lifted), or put back
+function Tyres2.light(cell, on: boolean)
+	if not cell then return end
+	if on then
+		-- (no glow behind: the soft glow art draws as a box at this size; the edge carries it)
+		if cell.edge then
+			Kit.tween(cell.edge, 0.15, { ImageColor3 = Kit.lift(cell.base, 0.45) })
+			Kit.flow(cell.edge, "sheen", 0.35, 3.2)
+		end
+		Kit.tween(cell.holder, 0.16, { Position = UDim2.fromOffset(0, -4) }, Enum.EasingStyle.Back)
+		Kit.pop(cell.holder, 0.94, 0.22)
+	else
+		Kit.tween(cell.sel, 0.2, { ImageTransparency = 1 })
+		if cell.edge then
+			Kit.unflow(cell.edge)
+			Kit.tween(cell.edge, 0.2, { ImageColor3 = cell.base })
+		end
+		Kit.tween(cell.holder, 0.16, { Position = UDim2.fromOffset(0, 0) })
+	end
+end
+
 function Tyres2:markSelected(cell)
 	if self.selCell and self.selCell ~= cell then
-		self.selCell.sel.Visible = false
-		if self.selCell.model then TyreShow.pose(self.selCell.model, TyreShow.THUMB_YAW) end
+		local old = self.selCell
+		Kit.tween(old.sel, 0.2, { ImageTransparency = 1 })
+		if old.edge then
+			Kit.unflow(old.edge)
+			Kit.tween(old.edge, 0.2, { ImageColor3 = old.base })
+		end
+		Kit.tween(old.holder, 0.16, { Position = UDim2.fromOffset(0, 0) })
+		if old.model then TyreShow.pose(old.model, TyreShow.THUMB_YAW) end
 	end
 	self.selCell = cell
 	if cell then
-		cell.sel.Visible = true
-		Kit.pop(cell.sel, 0.9, 0.2)
+		-- (no glow behind: the soft glow art draws as a box at this size; the edge carries it)
+		if cell.edge then
+			Kit.tween(cell.edge, 0.15, { ImageColor3 = Kit.lift(cell.base, 0.45) })
+			Kit.flow(cell.edge, "sheen", 0.35, 3.2)
+		end
+		Kit.tween(cell.holder, 0.16, { Position = UDim2.fromOffset(0, -4) }, Enum.EasingStyle.Back)
+		Kit.pop(cell.holder, 0.94, 0.22)
 		self.turnYaw = TyreShow.THUMB_YAW
 	end
 end

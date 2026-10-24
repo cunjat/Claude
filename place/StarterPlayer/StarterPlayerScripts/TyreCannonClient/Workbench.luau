@@ -198,7 +198,7 @@ function Workbench:buildTyres(page: Frame)
 		ScrollBarThickness = 6, ScrollBarImageColor3 = C.line, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(), ZIndex = 7, Parent = page,
 	})
 	UI.mk("UIGridLayout", { CellSize = UDim2.fromOffset(Tyres2.CELL.X, Tyres2.CELL.Y), CellPadding = UDim2.fromOffset(10, 12), SortOrder = Enum.SortOrder.LayoutOrder, Parent = self.grid })
-	UI.mk("UIPadding", { PaddingTop = UDim.new(0, 20), PaddingLeft = UDim.new(0, 3), PaddingBottom = UDim.new(0, 40), Parent = self.grid })
+	UI.mk("UIPadding", { PaddingTop = UDim.new(0, 20), PaddingLeft = UDim.new(0, 8), PaddingBottom = UDim.new(0, 40), Parent = self.grid })
 	-- the cards' thumbnails are made as they scroll into view (Tyres2:fillVisible)
 	self.grid:GetPropertyChangedSignal("CanvasPosition"):Connect(function() self:fillThumbs() end)
 end
@@ -284,7 +284,7 @@ function Workbench:renderGrid()
 			end, self.grid)
 			if mine then self.cells[mine.uid] = cell end
 		end
-		if self.sel and self.cells[self.sel] then self.cells[self.sel].sel.Visible = true end
+		if self.sel and self.cells[self.sel] then Tyres2.light(self.cells[self.sel], true) end
 		return
 	end
 	for i, t in ipairs(list) do
@@ -295,7 +295,7 @@ function Workbench:renderGrid()
 		end
 		self.cells[t.uid] = cell
 	end
-	if self.sel and self.cells[self.sel] then self.cells[self.sel].sel.Visible = true end
+	if self.sel and self.cells[self.sel] then Tyres2.light(self.cells[self.sel], true) end
 end
 
 --==============================================================
@@ -393,6 +393,7 @@ function Workbench:buildStickers(page: Frame)
 	self.mirrorTog.ZIndex = 8
 	self.mirrorTog.Parent = self.controls
 	local rm = Kit.button("Remove", C.red, UDim2.fromOffset(134, 38), 16)
+	rm.root.Position = UDim2.fromOffset(0, 396)
 	rm.root.ZIndex = 8
 	rm.root.Parent = right
 	rm.onClick = function()
@@ -400,6 +401,7 @@ function Workbench:buildStickers(page: Frame)
 		self:renderCatalogue()
 	end
 	local clear = Kit.button("Clear all", C.grey, UDim2.fromOffset(134, 38), 16)
+	clear.root.Position = UDim2.fromOffset(148, 396)
 	clear.root.ZIndex = 8
 	clear.root.Parent = right
 	clear.onClick = function()
@@ -422,8 +424,8 @@ function Workbench:buildStickers(page: Frame)
 		self:refreshStickerUI()
 	end
 	self.saveBtn = save
-	rm.root.Position = UDim2.fromOffset(0, 364)
-	clear.root.Position = UDim2.fromOffset(148, 364)
+	rm.root.Position = UDim2.fromOffset(0, 360)
+	clear.root.Position = UDim2.fromOffset(148, 360)
 	self.removeBtn = rm
 	self.packSet = set
 end
@@ -578,12 +580,10 @@ function Workbench:buildStickerPad()
 			end
 			if best then
 				local was = self.selSticker
-				-- (the click that opens the close view only opens it: the next press drags)
-				local wasEditing = self.stand.isEditing()
 				self.selSticker = best
 				self:setEditing(true)
 				local box = self:stickerBox(best)
-				self.dragging = box ~= nil and wasEditing
+				self.dragging = box ~= nil and self.stand.isEditing()
 				self.grabOff = if box then box.c - d else Vector2.zero
 				self.dragZ = box and box.z or 0
 				if was ~= best then self:refreshStickerUI() end
@@ -671,19 +671,8 @@ function Workbench:stickerBox(i: number)
 	local pts, ups, zs = {}, Vector2.zero, 0
 	local n = 0
 	local pivot = m:GetPivot()
-	local editing = self.stand.isEditing()
-	local camPos = self.stand.camera().CFrame.Position
 	for _, c in ipairs(m:GetChildren()) do
-		local side = c:GetAttribute("StickerSide")
-		-- in the close view the near side; turning, whichever side of it faces the camera
-		local want = c:IsA("BasePart") and c.Name == "Sticker" and c:GetAttribute("StickerIndex") == i
-		if want and editing then
-			want = side == 1
-		elseif want then
-			local outward = (c :: BasePart).CFrame.LookVector * -(side or 1)
-			want = (camPos - (c :: BasePart).Position):Dot(outward) > 0
-		end
-		if want and c:IsA("BasePart") then
+		if c:IsA("BasePart") and c.Name == "Sticker" and c:GetAttribute("StickerIndex") == i and c:GetAttribute("StickerSide") == 1 then
 			local hs = c.Size / 2
 			for sx = -1, 1, 2 do
 				for sy = -1, 1, 2 do
@@ -735,12 +724,8 @@ function Workbench:placeOutline()
 		return
 	end
 	ring.Visible = true
-	-- (as shares of the bay: the box is in screen pixels, which already have the window's scaling in
-	-- them, and offsets inside the scaled bench would be scaled a second time)
-	local a = self.stand.root.AbsoluteSize
-	if a.X < 1 or a.Y < 1 then return end
-	ring.Position = UDim2.fromScale(0.5 + box.c.X / a.X, 0.5 + box.c.Y / a.Y)
-	ring.Size = UDim2.new(box.w / a.X, 6, box.h / a.Y, 6)
+	ring.Position = UDim2.new(0.5, box.c.X, 0.5, box.c.Y)
+	ring.Size = UDim2.fromOffset(box.w + 6, box.h + 6)
 	ring.Rotation = box.rot
 end
 
@@ -749,20 +734,8 @@ end
 function Workbench:layoutStand(big: boolean)
 	if self.big == big then return end
 	self.big = big
-	local labels = { self.dName, self.dPlate, self.favBtn.root, self.dInfo } :: { GuiObject }
-	-- (hidden as it grows; shown again only once it has shrunk back out of their way)
-	if big then
-		for _, g in ipairs(labels) do g.Visible = false end
-	end
-	local tw = Kit.tween(self.stand.root, 0.35, { Position = if big then BIG_POS else STAND_POS, Size = if big then BIG_SIZE else STAND_SIZE }, Enum.EasingStyle.Quart)
-	if not big then
-		local function show()
-			if not self.big then
-				for _, g in ipairs(labels) do g.Visible = true end
-			end
-		end
-		if tw then tw.Completed:Connect(show) else show() end
-	end
+	for _, g in ipairs({ self.dName, self.dPlate, self.favBtn.root, self.dInfo } :: { GuiObject }) do g.Visible = not big end
+	Kit.tween(self.stand.root, 0.4, { Position = if big then BIG_POS else STAND_POS, Size = if big then BIG_SIZE else STAND_SIZE }, Enum.EasingStyle.Back)
 end
 
 -- the sticker view (face-on, close) on or off; out of it the tyre turns and can be turned by hand
@@ -836,11 +809,10 @@ function Workbench:select(uid: number)
 		if e.uid == uid then t = e end
 	end
 	if not t then return end
-	if self.sel and self.cells and self.cells[self.sel] then self.cells[self.sel].sel.Visible = false end
+	if self.sel and self.cells and self.cells[self.sel] then Tyres2.light(self.cells[self.sel], false) end
 	self.sel = uid
 	if self.cells and self.cells[uid] then
-		self.cells[uid].sel.Visible = true
-		Kit.pop(self.cells[uid].sel, 0.9, 0.2)
+		Tyres2.light(self.cells[uid], true)
 	end
 	local def = Game.TyresById[t.id]
 	local rar = Game.RaritiesById[def.rarity]
@@ -854,12 +826,7 @@ function Workbench:select(uid: number)
 	if plate then plate.ImageColor3 = rar.color end
 	self.dPlateText.Text = string.upper(rar.id)
 	local info = Game.tyreLines(t.id, t.forge, t.mut)
-	-- its special and skill, said in full (in place of the bare names tyreLines ends with)
-	for _, a in ipairs(Game.tyreAbilities(t.id)) do
-		for k = #info, 1, -1 do
-			if info[k] == string.upper(a.name) or info[k] == "SKILL: " .. string.upper(a.name) then table.remove(info, k) end
-		end
-	end
+	-- its special and skill, said in full
 	for _, a in ipairs(Game.tyreAbilities(t.id)) do
 		table.insert(info, ("<font color=\"#F4F0E8\">%s: %s</font>"):format(string.upper(a.name), a.text))
 	end

@@ -3,6 +3,8 @@
 -- The flight on a phone. Put a thumb down on the left of the screen and drag: that's your stick,
 -- wherever it lands (up climbs, down dives, sideways steers). The right thumb has BOOST (nitro),
 -- TUCK (hold to dive faster) and SKILL, and BAIL is tucked up top where you won't hit it.
+-- (2026-10-24) BAIL and VIEW sat right on top of SKILL on a phone (a reach for SKILL could end the run):
+-- they're a row along the top right now, and BAIL is a 0.6 s hold.
 
 local UserInputService = game:GetService("UserInputService")
 local UI = require(script.Parent.UI)
@@ -114,19 +116,42 @@ function TouchControls.new(gui: ScreenGui)
 	hold(boost, C.blue, function(on) if self.sim then (self.sim :: any):setTouch("boost", on) end end)
 	local tuck = pad(right, "TUCK", Vector2.new(96, 96), UDim2.new(1, -156, 1, 0), Vector2.new(1, 1), 20, C.grey)
 	hold(tuck, C.grey, function(on) if self.sim then (self.sim :: any):setTouch("tuck", on) end end)
+	-- (the tutorial focuses on these)
+	self.boostPad, self.tuckPad = boost, tuck
 	-- the launch tyre's skill (Legendary and up); hidden when the tyre has none
 	local skill = pad(right, "SKILL", Vector2.new(104, 104), UDim2.new(1, -12, 1, -154), Vector2.new(1, 1), 20, C.orange)
 	skill.Name = "Skill"
+	-- (2026-10-24) a long name (MINI-TURBO, SANDEVISTAN) shrinks to fit inside the pad
+	skill.TextScaled = true
+	UI.mk("UITextSizeConstraint", { MaxTextSize = 20, MinTextSize = 9, Parent = skill })
+	UI.mk("UIPadding", { PaddingLeft = UDim.new(0, 10), PaddingRight = UDim.new(0, 10), Parent = skill })
 	hold(skill, C.orange, function(on) if self.sim then (self.sim :: any):setTouch("skill", on) end end)
 	self.skillPad = skill
 
-	local bail = pad(root, "BAIL", Vector2.new(76, 34), UDim2.new(1, -18, 0, 168), Vector2.new(1, 0), 15, C.grey)
+	local bail = pad(root, "BAIL", Vector2.new(84, 34), UDim2.new(1, -18, 0, 40), Vector2.new(1, 0), 15, C.grey)
 	bail.BackgroundTransparency = 0.6
-	bail.Activated:Connect(function()
-		if self.sim then (self.sim :: any):bail() end
+	local fill = UI.mk("Frame", {
+		Size = UDim2.fromScale(0, 1), BackgroundColor3 = C.red, BackgroundTransparency = 0.3, BorderSizePixel = 0, ZIndex = 22, Parent = bail,
+	}, { UI.corner(17) })
+	local holding: InputObject? = nil
+	bail.InputBegan:Connect(function(input)
+		if not isPress(input) or holding then return end
+		holding = input
+		bail.Text = "HOLD"
+		fill.Size = UDim2.fromScale(0, 1)
+		Kit.tween(fill, 0.6, { Size = UDim2.fromScale(1, 1) }, Enum.EasingStyle.Linear)
+		task.delay(0.6, function()
+			if holding == input and self.sim then (self.sim :: any):bail() end
+		end)
+	end)
+	bail.InputEnded:Connect(function(input)
+		if input ~= holding then return end
+		holding = nil
+		bail.Text = "BAIL"
+		Kit.tween(fill, 0.12, { Size = UDim2.fromScale(0, 1) })
 	end)
 	-- first person and chase
-	local view = pad(root, "VIEW", Vector2.new(76, 34), UDim2.new(1, -18, 0, 210), Vector2.new(1, 0), 15, C.grey)
+	local view = pad(root, "VIEW", Vector2.new(76, 34), UDim2.new(1, -110, 0, 40), Vector2.new(1, 0), 15, C.grey)
 	view.BackgroundTransparency = 0.6
 	view.Activated:Connect(function()
 		if self.sim then (self.sim :: any):toggleView() end
@@ -136,7 +161,9 @@ function TouchControls.new(gui: ScreenGui)
 end
 
 function TouchControls:shouldShow(): boolean
+	-- (Studio: the workspace attribute ForceTouch lays the run out as on a phone, HudUI too)
 	return self.forced or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
+		or (game:GetService("RunService"):IsStudio() and workspace:GetAttribute("ForceTouch") == true)
 end
 
 function TouchControls:bind(sim)

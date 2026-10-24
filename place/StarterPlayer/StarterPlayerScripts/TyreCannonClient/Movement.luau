@@ -83,7 +83,7 @@ function Movement:setSprint(on: boolean)
 	self.sprinting = on
 	local hum = self:humanoid()
 	if not hum or not self.enabled then return end
-	TweenService:Create(hum, TweenInfo.new(0.2), { WalkSpeed = on and SPRINT or WALK }):Play()
+	TweenService:Create(hum, TweenInfo.new(on and 0.45 or 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { WalkSpeed = on and SPRINT or WALK }):Play()
 	if self.button then UI.setButtonStyle(self.button, on and "primary" or "ghost") end
 end
 

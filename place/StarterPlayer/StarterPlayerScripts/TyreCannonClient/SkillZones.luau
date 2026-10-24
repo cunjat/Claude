@@ -3,8 +3,8 @@
 -- Stretches of road set out for the launch tyre's skill (TrackGen:skillZones), so the skill is part
 -- of the road rather than a button pressed anywhere:
 --   air    Scarab Wings, Zero-G, Inhale: an updraft. With the skill running inside it you climb
---   smash  Meteor, Drill Dash, Mine: a scatter of extra smashables (TrackGen); each one smashed
---          while the skill is running is a second link (the chain's cash multiplier climbs faster)
+--   smash  Meteor, Drill Dash, Mine: a scatter of extra smashables (TrackGen), each pays double
+--          while the skill is running
 --   speed  Sandevistan, Mini-Turbo: a line of boost pads (TrackGen); the skill doubles their kick
 -- Each zone has a glowing arch at each end, a coloured band down the road between them and a sign
 -- at the entry. Inside, the skill comes back three times as fast; used (or running) inside, it's a
@@ -32,7 +32,7 @@ local COLOR = {
 }
 local HINT = {
 	air = "UPDRAFT · USE IT TO CLIMB",
-	smash = "SMASH THROUGH · EVERY HIT LINKS TWICE",
+	smash = "SMASH THROUGH · DOUBLE PAY",
 	speed = "PADS · DOUBLE KICK",
 }
 local BUILD_AHEAD = 1100
@@ -93,12 +93,12 @@ function SkillZones:build(zone)
 		part(f, Vector3.new(3, 3, w * 2 + 3), CFrame.new(x, y + 46, 0), col, Enum.Material.Neon, 0.1)
 	end
 	-- the band down the road between them, slab by slab
-	local SEG = 10
+	local SEG = 20
 	local x = zone.x0
 	while x < zone.x1 do
 		local x2 = math.min(zone.x1, x + SEG)
-		local a = Vector3.new(x, track:heightAt(x) + 0.6, 0)
-		local b = Vector3.new(x2, track:heightAt(x2) + 0.6, 0)
+		local a = Vector3.new(x, track:heightAt(x) + 0.35, 0)
+		local b = Vector3.new(x2, track:heightAt(x2) + 0.35, 0)
 		local mid = (a + b) / 2
 		local len = (b - a).Magnitude
 		part(f, Vector3.new(len + 0.4, 0.2, w * 2), CFrame.lookAt(mid, b) * CFrame.Angles(0, math.pi / 2, 0), col, Enum.Material.Neon, 0.78)
@@ -106,15 +106,13 @@ function SkillZones:build(zone)
 	end
 	-- an updraft: golden motes rising the length of the zone
 	if self.kind == "air" then
-		-- (a run of short emitters along the ground, so the motes rise off the road all the way)
-		for k = 0, 5 do
-		local mid = zone.x0 + (k + 0.5) * (zone.x1 - zone.x0) / 6
-		local base = part(f, Vector3.new((zone.x1 - zone.x0) / 6, 1, w * 2), CFrame.new(mid, track:heightAt(mid) + 2, 0), col, Enum.Material.Neon, 1)
+		local mid = (zone.x0 + zone.x1) / 2
+		local base = part(f, Vector3.new(zone.x1 - zone.x0, 1, w * 2), CFrame.new(mid, track:heightAt(mid) + 2, 0), col, Enum.Material.Neon, 1)
 		local pe = Instance.new("ParticleEmitter")
 		pe.Texture = "rbxasset://textures/particles/sparkles_main.dds"
 		pe.Color = ColorSequence.new(col)
 		pe.LightEmission = 1
-		pe.Rate = 15
+		pe.Rate = 90
 		pe.Lifetime = NumberRange.new(2.5, 4)
 		pe.Speed = NumberRange.new(40, 70)
 		pe.EmissionDirection = Enum.NormalId.Top
@@ -122,13 +120,12 @@ function SkillZones:build(zone)
 		pe.Size = NumberSequence.new({ NumberSequenceKeypoint.new(0, 2.4), NumberSequenceKeypoint.new(1, 0.4) })
 		pe.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.2), NumberSequenceKeypoint.new(1, 1) })
 		pe.Parent = base
-		end
 	end
 	-- the sign at the entry
 	local y0 = track:heightAt(zone.x0)
 	local anchor = part(f, Vector3.new(1, 1, 1), CFrame.new(zone.x0, y0 + 58, 0), col, Enum.Material.Neon, 1)
 	local bb = Instance.new("BillboardGui")
-	bb.Size = UDim2.fromScale(70, 16)    -- (in studs: it shrinks with distance like the arch it's on)
+	bb.Size = UDim2.fromOffset(420, 96)
 	bb.AlwaysOnTop = false
 	bb.LightInfluence = 0
 	bb.MaxDistance = 1400
@@ -169,6 +166,9 @@ function SkillZones:step(dt: number)
 		sim.perfects += 1
 		sim:link()
 		sim.nitro = math.min(sim.nitroMax, sim.nitro + 25)
+		sim.bonus += Config.Economy.CreditsPerSmash * 4
+		-- (2026-10-24) counted for the server, which pays it (sim.bonus never reached it)
+		sim.zoneBonus = (sim.zoneBonus or 0) + 1
 		sim.onEvent({ kind = "skillzone", what = "bonus", name = self.name, chain = sim.chain, combo = sim.combo })
 	end
 	-- the updraft lifts a tyre whose skill is running (in the air)
@@ -181,8 +181,8 @@ end
 function SkillZones:smashed(): boolean
 	local sk = self.sim.skills
 	if self.kind == "smash" and self.inside and sk and sk:isActive() then
-		-- a second link for it: the chain (and the cash multiplier it carries) climbs twice as fast
-		self.sim:link()
+		self.sim.bonus += Config.Economy.CreditsPerSmash
+		self.sim.zoneSmashes = (self.sim.zoneSmashes or 0) + 1
 		return true
 	end
 	return false

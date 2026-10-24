@@ -159,15 +159,16 @@ function Game.maxLevel(id: string): number
 	return m and m.maxLevel or Game.LevelsPerTier
 end
 
-function Game.machinePrice(id: string, level: number, tier: number): number
+-- `v` (the save, optional) brings the prestige and the perks into the price (Game.priceScale)
+function Game.machinePrice(id: string, level: number, tier: number, v: any?): number
 	local m = Game.MachinesById[id]
 	if not m then return math.huge end
 	local t = Game.Tiers[math.clamp(tier, 1, #Game.Tiers)]
 	if m.maxLevel then
 		-- utility machines: priced off the tier too, but on their own short ladder
-		return math.floor(m.cost * 3.2 ^ level * t.price)
+		return math.floor(m.cost * 3.2 ^ level * t.price * Game.priceScale(v))
 	end
-	return math.floor(m.cost * Game.PriceGrowth ^ level * t.price)
+	return math.floor(m.cost * Game.PriceGrowth ^ level * t.price * Game.priceScale(v))
 end
 
 -- the metres a plot can reach on an average run (before skill and luck)
@@ -195,6 +196,13 @@ end
 -- are higher there); your tyres and your cash (less the price) stay. It costs this many times what
 -- it takes to max the stage's three run machines, so it comes when you've nearly finished the stage.
 --==============================================================
+-- the first-session tutorial's steps (Tutorial.luau shows them, Analytics logs them as the onboarding
+-- funnel). The order is the funnel: a step only counts once the one before it has.
+Game.TutorialSteps = {
+	"Joined", "Launch", "Shift", "Nitro", "Tuck", "Land", "First run", "Spend it",
+	"Cannon bought", "Crate", "Second run", "Float", "Dive", "Daily", "Done",
+}
+
 Game.Overhaul = {
 	Mult = 3.0,         -- each plot stage multiplies all cash by this (x3, x9, x27, x81)
 	CostMult = 2.0,
@@ -202,12 +210,12 @@ Game.Overhaul = {
 }
 
 -- what moving up from `tier` costs
-function Game.plotUpgradeCost(tier: number): number
+function Game.plotUpgradeCost(tier: number, v: any?): number
 	local total = 0
 	for _, id in ipairs(Game.Overhaul.Machines) do
-		for lvl = 0, Game.maxLevel(id) - 1 do total += Game.machinePrice(id, lvl, tier) end
+		for lvl = 0, Game.maxLevel(id) - 1 do total += Game.machinePrice(id, lvl, tier, v) end
 	end
-	return math.floor(total * Game.Overhaul.CostMult)
+	return math.floor(total * Game.Overhaul.CostMult * (1 - 0.1 * Game.perkLv(v, "scrap")))
 end
 
 -- the stage's cash multiplier (after `overhauls` upgrades)
@@ -223,8 +231,270 @@ function Game.machinesMaxed(v): boolean
 	return true
 end
 
+-- the stage's trial (Goals) is done: a save from before trials has none, and counts as done
+function Game.trialDone(v): boolean
+	return v.trial == nil or v.trial.done == true
+end
+
 function Game.canUpgradePlot(v, credits: number): boolean
-	return v.tier < #Game.Tiers and Game.machinesMaxed(v) and credits >= Game.plotUpgradeCost(v.tier)
+	return v.tier < #Game.Tiers and Game.machinesMaxed(v) and Game.trialDone(v) and credits >= Game.plotUpgradeCost(v.tier, v)
+end
+
+--==============================================================
+-- prestige (Loop's Prestige, 2026-10-12): past the top stage the yard starts again from the Dirt Lot.
+-- Each prestige is all cash +50% for good, on top of everything else; the stage multiplier goes back to
+-- x1 and is earned again stage by stage. It pays keys, puts P1, P2... on your yard sign and keeps
+-- everything you collected: tyres, keys, cosmetics, the compressor and the spare rack. (The v1 prestige
+-- wiped your cosmetics and paid tokens for a shop that's gone.) p.prestige, capped at 25 by Profile.
+--==============================================================
+Game.Prestige = {
+	CashPer = 0.5,      -- all cash +50% per prestige
+	Keys = 14,          -- keys for prestiging...
+	KeysPer = 1,        -- ...plus this many per level reached (P1 15, P2 16, ...: keys are rare now)
+	Max = 25,           -- (Config.Prestige.MaxLevel, the cap Profile.sanitize keeps)
+	-- v4 (2026-10-16): a prestige spends all your cash (the climb starts from nothing, as a rebirth
+	-- should), and every price grows with prestige as its cash bonus to this power, so a climb never
+	-- collapses into a minute: each one is about as long as the last, a little shorter for the bonus
+	PriceExp = 0.8,
+	Choices = 3,        -- perks offered at each prestige (pick one)
+}
+
+-- v4: the save's prestige (mirrored into profile.v2 as `pres`) and a perk's level
+function Game.presOf(v: any?): number
+	return (v and v.pres) or 0
+end
+
+function Game.perkLv(v: any?, id: string): number
+	local p = v and v.perks
+	return (p and p[id]) or 0
+end
+
+-- every price scales with the prestige (Game.Prestige.PriceExp) and the Bargain Bin perk
+function Game.priceScale(v: any?): number
+	return Game.prestigeMult(Game.presOf(v)) ^ Game.Prestige.PriceExp * (1 - 0.08 * Game.perkLv(v, "bargain"))
+end
+
+--==============================================================
+-- prestige perks (v4): each prestige offers three, you keep one for good. They stack up into a build
+-- of your own, so every climb plays a little differently: cheaper machines and a sprint through the
+-- early stages, or a stronger cannon, or keys and luck, or a yard that earns while you're away.
+--==============================================================
+Game.Perks = {
+	{ id = "bargain", name = "Bargain Bin", text = "Machines cost %d%% less", per = 8, max = 4, icon = "cannon" },
+	{ id = "scrap", name = "Scrap Dealer", text = "Stage-ups cost %d%% less", per = 10, max = 3, icon = "plot" },
+	{ id = "barrel", name = "Hot Barrel", text = "Launch speed +%d%%", per = 5, max = 4, icon = "cannon" },
+	{ id = "tank", name = "Deep Tank", text = "Nitro tank +%d%% and recharge", per = 10, max = 4, icon = "fuel" },
+	{ id = "headstart", name = "Head Start", text = "Every stage starts with machines at level %d", per = 1, max = 3, icon = "plot" },
+	{ id = "finder", name = "Key Finder", text = "+%d key every 5 runs", per = 1, max = 3, icon = "key" },
+	{ id = "luck", name = "Lucky Spin", text = "Epic and rarer %d%% more likely in crates", per = 15, max = 3, icon = "crate" },
+	{ id = "idle", name = "Idle Hands", text = "Auto-cannon and offline pay +%d%%", per = 20, max = 4, icon = "cannon" },
+	{ id = "wreck", name = "Wrecking Ball", text = "Smashing pays +%d%%", per = 50, max = 3, icon = "tyre" },
+	{ id = "magnet", name = "Coin Magnet", text = "Coins pay +%d%% and pull from further", per = 15, max = 3, icon = "cash" },
+	{ id = "showman", name = "Showman", text = "Yard style +%d%%", per = 10, max = 3, icon = "plot" },
+	{ id = "trials", name = "Trial Runner", text = "Stage trials %d%% easier", per = 10, max = 3, icon = "medal" },
+}
+Game.PerksById = {}
+for _, pk in ipairs(Game.Perks) do Game.PerksById[pk.id] = pk end
+
+-- what a perk does at a level, in words
+function Game.perkText(id: string, level: number): string
+	local pk = Game.PerksById[id]
+	if not pk then return "" end
+	return pk.text:format(pk.per * math.max(1, level))
+end
+
+-- the three on offer at a prestige: perks not yet at their top, rolled from the player and the level
+function Game.perkOffer(uid: number, pres: number, perks: { [string]: number }?): { string }
+	local pool = {}
+	for _, pk in ipairs(Game.Perks) do
+		if ((perks and perks[pk.id]) or 0) < pk.max then table.insert(pool, pk.id) end
+	end
+	local r = Random.new((uid % 1000003) * 53 + pres * 7)
+	local out = {}
+	while #out < Game.Prestige.Choices and #pool > 0 do
+		table.insert(out, table.remove(pool, r:NextInteger(1, #pool)))
+	end
+	return out
+end
+
+function Game.prestigeMult(level: number?): number
+	return 1 + Game.Prestige.CashPer * math.max(0, level or 0)
+end
+
+-- what a prestige costs: the price of one more stage past the top
+function Game.prestigeCost(v: any?): number
+	return Game.plotUpgradeCost(#Game.Tiers, v)
+end
+
+function Game.canPrestige(v, credits: number, level: number?): boolean
+	return v.tier >= #Game.Tiers and Game.machinesMaxed(v) and Game.trialDone(v) and credits >= Game.prestigeCost(v) and (level or 0) < Game.Prestige.Max
+end
+
+-- prestige looks (2026-10-12, the Prestige & Neon design canvas): each milestone has one colour that
+-- shows on your tyre (a neon lip, PrestigeLook.dressTyre), your cannon (a trim: muzzle ring, barrel
+-- tube, collars, a P badge) and the Hall of Prestige yard (YardLook). Levels between milestones keep
+-- the last milestone's look plus a gold pip a level. `collar` nil keeps the cannon's own collars.
+local function rgb(r: number, g: number, b: number): Color3 return Color3.fromRGB(r, g, b) end
+Game.PrestigeLooks = {
+	{ n = 1, name = "Neon Halo", color = rgb(63, 184, 255) },
+	{ n = 2, name = "Mint Line", color = rgb(67, 230, 160) },
+	{ n = 3, name = "Ember Tread", color = rgb(255, 122, 46), strap = rgb(255, 122, 46) },
+	{ n = 5, name = "Molten Gold", color = rgb(255, 194, 58), collar = rgb(255, 194, 58), strap = rgb(255, 194, 58) },
+	{ n = 8, name = "Void Chrome", color = rgb(166, 107, 255), collar = rgb(42, 30, 70), strap = rgb(201, 168, 255) },
+	{ n = 10, name = "Checker Crown", color = rgb(255, 79, 163), collar = rgb(244, 241, 232) },
+	{ n = 15, name = "Circuit", color = rgb(184, 240, 58), collar = rgb(22, 48, 31), strap = rgb(184, 240, 58) },
+	{ n = 20, name = "Inferno", color = rgb(255, 59, 48), collar = rgb(122, 22, 16), strap = rgb(255, 122, 46) },
+	{ n = 25, name = "Prism Apex", color = rgb(255, 79, 163), collar = rgb(230, 235, 242), strap = rgb(244, 241, 232),
+		prism = { rgb(63, 184, 255), rgb(255, 194, 58), rgb(255, 79, 163) } },
+}
+Game.PrestigePip = rgb(255, 194, 58)
+-- the tubes on prestige looks, the yard looks and the neon decor: off, they're bright flat paint; on,
+-- they're Neon material, which blooms under the game's Bloom. On since 2026-10-17: the owner lifted the
+-- no-glow rule so the neon pack really glows (NeonDecor and YardLook add the lights)
+Game.NeonTubes = true
+
+-- the look for a prestige level (nil below P1) and how many pips past its milestone
+function Game.prestigeLook(level: number?): (any?, number)
+	local lv = math.floor(level or 0)
+	local best = nil
+	for _, l in ipairs(Game.PrestigeLooks) do
+		if lv >= l.n then best = l end
+	end
+	return best, best and (lv - best.n) or 0
+end
+
+-- the colours a look paints with, in order (one, or the three of the prism)
+function Game.lookColors(look: any?): { Color3 }
+	if not look then return {} end
+	return look.prism or { look.color }
+end
+
+-- yard looks: what the yard's floor and edges are dressed as (YardLook). The stage's own look is
+-- free; the Hall of Prestige comes with your first prestige; the Midnight Garage is a gamepass
+-- (Config.Store.Passes "midnight", 699 R$) and comes in three colourways.
+Game.YardLooks = {
+	{ id = "stage", name = "Stage Look", text = "The yard as its stage builds it." },
+	{ id = "prestige", name = "Hall of Prestige", text = "Your milestone colour round the edge, down the lane and under the cannon.", prestige = 1 },
+	{ id = "midnight", name = "Midnight Garage", text = "Night floor, a double neon edge, a bump lane and tyre towers.", pass = "midnight",
+		ways = {
+			{ id = "Midnight", a = rgb(224, 64, 251), b = rgb(46, 230, 242), floor = rgb(29, 22, 56), grid = rgb(52, 42, 96) },
+			{ id = "Sunset", a = rgb(255, 122, 46), b = rgb(255, 79, 163), floor = rgb(40, 22, 44), grid = rgb(76, 40, 72) },
+			{ id = "Toxic", a = rgb(184, 240, 58), b = rgb(46, 230, 242), floor = rgb(18, 28, 40), grid = rgb(34, 58, 70) },
+		} },
+}
+Game.YardLooksById = {}
+for _, l in ipairs(Game.YardLooks) do Game.YardLooksById[l.id] = l end
+
+-- the Midnight Garage's colourway by name (the first when unknown)
+function Game.yardWay(name: string?): any
+	local ways = Game.YardLooksById.midnight.ways
+	for _, w in ipairs(ways) do
+		if w.id == name then return w end
+	end
+	return ways[1]
+end
+
+-- can someone with this prestige and these passes use the look (or the decor kind)?
+function Game.lookOpen(item: any, prestige: number?, passes: { [string]: any }?): boolean
+	if not item then return false end
+	if item.prestige and (prestige or 0) < item.prestige then return false end
+	if item.pass and not (passes and passes[item.pass]) then return false end
+	return true
+end
+
+--==============================================================
+-- levels (Server/Career): XP from playing, a level badge whose colour moves up through the bands, keys
+-- on every level (5 every 5th, 10 every 10th)
+--==============================================================
+Game.Levels = {
+	Base = 100, Step = 40,      -- XP from level L to L+1: Base + Step * (L - 1)  (L10 ~40 runs, L50 ~10 h)
+	XP = {
+		run = 20, zone = 10,    -- a finished run, +10 for each zone past the first it reached
+		best = 25,              -- a new best
+		upgrade = 5,            -- a machine level
+		crate = 8,              -- each tyre out of a crate
+		stage = 150,            -- a yard stage-up
+		prestige = 500,
+		heat = 20, heatWin = 60,   -- finishing a Heat, winning one
+		daily = 40,             -- the daily reward
+	},
+	Bands = {   -- the badge's colour and rank from this level up
+		{ from = 1,   name = "Rookie", color = Color3.fromRGB(205, 140, 80) },
+		{ from = 10,  name = "Driver", color = Color3.fromRGB(192, 198, 210) },
+		{ from = 25,  name = "Pro",    color = Color3.fromRGB(236, 196, 120) },
+		{ from = 50,  name = "Ace",    color = Color3.fromRGB(48, 178, 184) },
+		{ from = 75,  name = "Legend", color = Color3.fromRGB(152, 98, 236) },
+		{ from = 100, name = "Master", color = Color3.fromRGB(214, 52, 48) },
+	},
+	Max = 999,
+}
+
+function Game.xpToNext(level: number): number
+	return Game.Levels.Base + Game.Levels.Step * (math.max(1, level) - 1)
+end
+
+function Game.levelBand(level: number)
+	local band = Game.Levels.Bands[1]
+	for _, b in ipairs(Game.Levels.Bands) do
+		if level >= b.from then band = b end
+	end
+	return band
+end
+
+-- keys for reaching `level`
+-- (2026-10-16: keys are rare) every 5th level a key or two, every 10th a handful
+function Game.levelKeys(level: number): number
+	if level % 10 == 0 then return 5 end
+	if level % 5 == 0 then return 2 end
+	return 0
+end
+
+--==============================================================
+-- titles (Config.Titles): how far a save is toward one, as (have, goal). Shared, so the Profile panel
+-- shows the same numbers the server unlocks on
+--==============================================================
+function Game.titleProgress(p, t): (number, number)
+	if t.live then
+		local rank = p.live and tonumber(p.live[t.live.board])
+		return if rank and rank <= t.live.rank then 1 else 0, 1
+	end
+	local c = t.cond or {}
+	local goal = c.goal or 1
+	local v = p.v2 or {}
+	local cr = v.career or {}
+	local st = p.stats or {}
+	local s = c.stat
+	local have = 0
+	if s == "runs" then
+		have = v.runs or 0
+	elseif s == "upgrades" or s == "perfects" or s == "crates" or s == "heatWins" then
+		have = cr[s] or 0
+	elseif s == "best" then
+		have = math.floor(v.bestEver or 0)
+	elseif s == "zone" then
+		have = if v.zones and v.zones[c.zone] then 1 else 0
+	elseif s == "flawless" or s == "cleanRuns" or s == "smashes" or s == "longestAir" then
+		have = st[s] or 0
+	elseif s == "index" then
+		for _ in pairs(v.index or {}) do have += 1 end
+	elseif s == "stage" then
+		have = math.max(v.tier or 1, cr.maxStage or 1, if (p.prestige or 0) > 0 then #Game.Tiers else 0)
+	elseif s == "bestSpectators" then
+		have = p.lifetime and p.lifetime.bestSpectators or 0
+	elseif s == "prestige" then
+		have = p.prestige or 0
+	elseif s == "level" then
+		have = cr.level or 1
+	elseif s == "rarity" then
+		for id in pairs(v.index or {}) do
+			local tt = Game.TyresById[id]
+			if tt and tt.rarity == c.rarity then
+				have = 1
+				break
+			end
+		end
+	end
+	return math.min(have, goal), goal
 end
 
 --==============================================================
@@ -291,12 +561,15 @@ for _, m in ipairs(Game.Mutations) do Game.MutationsById[m.id] = m end
 -- roll a mutation for a fresh tyre (nil = none); `event` is the server event that's on, if any
 function Game.rollMutation(r: number, luck: number?, event: string?): string?
 	local k = luck or 1
+	-- (2026-10-18) the event's slice comes first and the usual ones after it: they used to share the
+	-- same low numbers, so during the Monsoon no Chrome or Rainbow could ever drop
+	local acc = 0
 	for _, m in ipairs(Game.Mutations) do
 		if m.event and m.event == event then
 			if r < 0.12 then return m.id end
+			acc = 0.12
 		end
 	end
-	local acc = 0
 	for i = #Game.Mutations, 1, -1 do
 		local m = Game.Mutations[i]
 		if not m.event then
@@ -310,12 +583,13 @@ end
 -- a tyre from a dearer crate is worth more at every rarity: a Highway tyre x2 a Backroad one, a
 -- Dunes tyre x4 (so a Dunes Common beats a Backroad Epic), and a few more stat points. Mythics and
 -- Secrets (any crate) count as the top zone.
+-- (v4: x1.6 and x2.4, down from x2 and x4: one lucky Dunes crate no longer outruns the whole yard)
 Game.ZonePower = {
 	backroad = { mult = 1, pts = 0 },
-	highway = { mult = 2, pts = 1.5 },
-	dunes = { mult = 4, pts = 3 },
-	mythic = { mult = 4, pts = 3 },
-	secret = { mult = 4, pts = 3 },
+	highway = { mult = 1.6, pts = 1.5 },
+	dunes = { mult = 2.4, pts = 3 },
+	mythic = { mult = 2.4, pts = 3 },
+	secret = { mult = 2.4, pts = 3 },
 	retired = { mult = 1, pts = 0 },
 }
 function Game.zonePower(id: string): { mult: number, pts: number }
@@ -417,7 +691,8 @@ Game.Skills = {
 	wings = { name = "Scarab Wings", key = "E", cooldown = 14, text = "Golden wings: four seconds of true glide, no sink and no stall" },
 	sandevistan = { name = "Sandevistan", key = "E", cooldown = 16, text = "The world slows to a crawl while you don't, leaving afterimages: every ring is easy to line up" },
 	zerog = { name = "Zero-G", key = "E", cooldown = 13, text = "Three seconds of low gravity in a ring of stardust" },
-	miniturbo = { name = "Mini-Turbo", key = "E", cooldown = 0, text = "Hold to charge sparks blue, orange, purple; let go to shoot off" },
+	-- (2026-10-24) a 5 s cooldown and charged on the ground only: it was free speed with no limit
+	miniturbo = { name = "Mini-Turbo", key = "E", cooldown = 5, text = "On the ground, hold to charge sparks blue, orange, purple; let go to shoot off" },
 	mine = { name = "Mine", key = "E", cooldown = 10, text = "The next few things you hit break into blocks and drop coins" },
 	inhale = { name = "Inhale", key = "E", cooldown = 12, text = "Swallow everything ahead, then float puffed up" },
 }
@@ -536,9 +811,32 @@ end
 -- crates and keys
 --==============================================================
 Game.Keys = {
-	PerRunStreak = 10,   -- a free key every this many runs
+	PerRunStreak = 25,   -- a free key every this many runs (2026-10-16: was 10)
 	StartWith = 1,
+	OpeningRuns = 5,     -- (v4) the key over the buffalo only shows on a newcomer's first runs
+	-- (2026-10-16) keys are the rare currency: a zone's key is out on the road on only some runs
+	-- (the server rolls which, Game.runKeys), so seeing one is worth the detour
+	ZoneChance = 0.2,
 }
+
+-- Roblox Premium (2026-10-16): members earn a little more cash and get a key every day they play
+Game.Premium = { Cash = 1.1, DailyKeys = 1 }
+
+-- which of Game.keySpots() are out on the road this run (indices): the opening one for newcomers,
+-- each zone's by chance, rolled from the run's seed so server and client agree
+function Game.runKeys(seed: number, runs: number): { number }
+	local r = Random.new((seed % 2147483646) + 7717)
+	local out = {}
+	for i = 1, #Game.keySpots() do
+		local roll = r:NextNumber()
+		if i == 1 then
+			if runs < Game.Keys.OpeningRuns then table.insert(out, i) end
+		elseif roll < Game.Keys.ZoneChance then
+			table.insert(out, i)
+		end
+	end
+	return out
+end
 
 -- where the keys sit on the road: one over the buffalo in the opening stretch, then one in every
 -- zone, 40% of the way through it
@@ -561,7 +859,10 @@ end
 -- (premium: Epic and up twice as likely, and every key crate counts toward the pity, a guaranteed
 -- featured Legendary). Up to Game.Crate.MaxOpen at once.
 Game.Crate = {
-	MaxOpen = 3,
+	MaxOpen = 10,
+	Multi = 10,           -- the big open: this many at once, and one of them always Rare or better
+	MultiFloor = "Rare",
+	CashPity = 120,       -- cash crates without a Legendary or better, then the featured Legendary
 	Cash = { backroad = 600, highway = 2000, dunes = 6000 },
 	KeyLuck = 2,          -- key crates: Epic and up this much more likely
 	Pity = 25,            -- key crates without a Legendary or better, then the featured Legendary
@@ -571,11 +872,11 @@ Game.Crate = {
 }
 
 -- what a zone's crate costs in cash at a yard stage (it grows with the stage, like the machines)
-function Game.crateCash(zoneId: string, tier: number): number
+function Game.crateCash(zoneId: string, tier: number, v: any?): number
 	local base = Game.Crate.Cash[zoneId] or 1000
 	local t1 = Game.Tiers[1].price
 	local tt = (Game.Tiers[math.clamp(tier, 1, #Game.Tiers)] or Game.Tiers[1]).price
-	local raw = base * tt / t1
+	local raw = base * tt / t1 * Game.prestigeMult(Game.presOf(v)) ^ Game.Prestige.PriceExp
 	local mag = 10 ^ math.max(0, math.floor(math.log10(raw)) - 1)
 	return math.floor(raw / mag + 0.5) * mag
 end
@@ -583,7 +884,9 @@ end
 -- the banner: a featured Legendary and a featured Mythic, changing every BannerHours on a clock
 -- every server shares (UTC): its index, the two tyre ids, the next Legendary, when it ends (os.time)
 local LEGENDS, MYTHS = {}, {}
-function Game.banner(now: number?)
+-- (2026-10-16) each crate features its own zone's Legendary (zoneId given); without a zone, the
+-- old rotation through every Legendary. The Mythic rotates the same either way.
+function Game.banner(now: number?, zoneId: string?)
 	if #LEGENDS == 0 then
 		for _, t in ipairs(Game.Tyres) do
 			if t.zone ~= "retired" and t.rarity == "Legendary" then table.insert(LEGENDS, t.id) end
@@ -592,9 +895,13 @@ function Game.banner(now: number?)
 	end
 	local span = Game.Crate.BannerHours * 3600
 	local idx = math.floor((now or os.time()) / span)
+	local own = {}
+	for _, t in ipairs(zoneId and Game.TyresByZone[zoneId] or {}) do
+		if t.rarity == "Legendary" then table.insert(own, t.id) end
+	end
 	return {
 		index = idx,
-		legendary = LEGENDS[idx % #LEGENDS + 1],
+		legendary = if #own > 0 then own[idx % #own + 1] else LEGENDS[idx % #LEGENDS + 1],
 		mythic = MYTHS[idx % math.max(1, #MYTHS) + 1],
 		nextLegendary = LEGENDS[(idx + 1) % #LEGENDS + 1],
 		ends = (idx + 1) * span,
@@ -604,7 +911,7 @@ end
 -- a zone's crate holds its six tyres; the mythics and secrets can drop from any crate; the banner's
 -- Legendary drops from every crate at FeaturedMult its odds, its Mythic at MythicMult
 function Game.crateOdds(zoneId: string, now: number?, featuredMult: number?): { { id: string, odds: number, featured: boolean? } }
-	local b = Game.banner(now)
+	local b = Game.banner(now, zoneId)
 	local list = {}
 	local total = 0
 	for _, t in ipairs(Game.TyresByZone[zoneId] or {}) do
@@ -650,12 +957,14 @@ function Game.equipped(owned: { [number]: any }, launchUid: number?, spareUids: 
 	return launchUid and byUid[launchUid] or nil, spares
 end
 
--- the tyre bucket: 1 plus what every equipped tyre's multiplier adds over 1
+-- the tyre bucket: 1 plus what every equipped tyre's multiplier adds over 1 (v4: the launch tyre
+-- in full, each spare at Game.SpareCash of it, so a rack of luck can't skip the yard)
+Game.SpareCash = 0.4
 function Game.tyreBucket(owned: { [number]: any }, launchUid: number?, spareUids: { number }): number
 	local launch, spares = Game.equipped(owned, launchUid, spareUids)
 	local total = 1
 	if launch then total += Game.tyreMult(launch.id, launch.forge, launch.mut) - 1 end
-	for _, t in ipairs(spares) do total += Game.tyreMult(t.id, t.forge, t.mut) - 1 end
+	for _, t in ipairs(spares) do total += (Game.tyreMult(t.id, t.forge, t.mut) - 1) * Game.SpareCash end
 	return total
 end
 
@@ -672,7 +981,11 @@ Game.IndexEvery = 5
 Game.IndexBonus = 0.05
 
 -- the yard's auto-cannon: while you're in the server and not on a run, it fires on its own
-Game.AutoCannon = { Every = 30, Share = 0.35, PassShare = 0.35 }
+-- (the Auto Launch pass makes it fire harder: PassShare)
+-- (2026-10-24) MaxShare: with the pass, a style bonus and the idle perk the share reached 173% of the
+-- run rate, so standing still paid better than playing; everything together stops at 75%
+-- (PassShare 0.56: the pass says "60% more" than 0.35; 0.6 was 71%)
+Game.AutoCannon = { Every = 30, Share = 0.35, PassShare = 0.56, MaxShare = 0.75 }
 
 -- server events: one every Every seconds (on a clock every server shares), lasting Length
 Game.Events = {
@@ -711,7 +1024,9 @@ Game.Heats = { Every = 150, Join = 30, Pay = { 1.0, 0.5, 0.25 }, TopKeys = 1, Mi
 --==============================================================
 -- time-based rewards
 --==============================================================
-Game.Offline = { Share = 0.20, CapHours = 4 }        -- compressor at max level: a fifth of your active rate
+-- (v4) while you're away the yard earns a share of your recent rate, for up to CapHours, raised by its
+-- style (Game.styleBonus) and the Idle Hands perk
+Game.Offline = { Share = 0.10, CapHours = 4 }
 
 --==============================================================
 -- numbers people read
@@ -727,7 +1042,12 @@ function Game.short(n: number): string
 		i += 1
 	end
 	local s = math.abs(v) >= 100 and ("%d"):format(math.floor(v)) or (math.abs(v) >= 10 and ("%.1f"):format(v) or ("%.2f"):format(v))
-	s = s:gsub("%.?0+$", "")
+	-- trailing zeros only come off a decimal ("1.50" -> "1.5", "2.00" -> "2"): a whole number keeps
+	-- them (it used to strip them too, so 200M showed as "2M" and 120K as "12K")
+	if s:find(".", 1, true) then
+		s = (s:gsub("0+$", ""))
+		s = (s:gsub("%.$", ""))
+	end
 	return s .. SUFFIX[i]
 end
 
@@ -811,9 +1131,227 @@ Game.YardDecor = {
 	{ id = "khejri", name = "Khejri Tree", path = "Scenery/dunes/Khejri", tier = 4, hx = 7.8, hz = 8.7 },
 	{ id = "billboard", name = "Billboard", path = "Scenery/highway/Billboard", tier = 5, hx = 11.1, hz = 2.4 },
 	{ id = "chhatri", name = "Chhatri", path = "Scenery/dunes/Chhatri", tier = 5, hx = 7.1, hz = 7.1 },
+	-- the neon decor pack (2026-10-12): built in code (NeonDecor.luau). `prestige` pieces come with that
+	-- prestige level, `pass` pieces with the Midnight Garage pass, the rest with their stage.
+	{ id = "laurel", name = "Laurel Ring", build = true, tier = 1, prestige = 1, hx = 5.6, hz = 5.6 },
+	{ id = "pillar", name = "Milestone Pillar", build = true, tier = 1, prestige = 2, hx = 1.6, hz = 1.6 },
+	{ id = "podium", name = "Winner's Podium", build = true, tier = 1, prestige = 3, hx = 4.8, hz = 1.8 },
+	{ id = "goldtyre", name = "Gold Tyre Statue", build = true, tier = 1, prestige = 5, hx = 2.6, hz = 1.6 },
+	{ id = "crownarch", name = "Crown Arch", build = true, tier = 1, prestige = 10, hx = 5.6, hz = 1.0 },
+	{ id = "prismbanner", name = "Prism Banner", build = true, tier = 1, prestige = 25, hx = 2.4, hz = 0.8 },
+	{ id = "neonsign", name = "Neon Tyre Sign", build = true, tier = 1, pass = "midnight", hx = 3.4, hz = 0.9 },
+	{ id = "neonarrow", name = "Neon Arrow", build = true, tier = 1, pass = "midnight", hx = 4.0, hz = 0.9 },
+	{ id = "neonbump", name = "Neon Speed Bump", build = true, tier = 1, pass = "midnight", hx = 5.4, hz = 1.8 },
+	{ id = "neonstack", name = "Neon Tyre Stack", build = true, tier = 1, pass = "midnight", hx = 2.4, hz = 2.4 },
+	{ id = "neoncones", name = "Neon Cones", build = true, tier = 1, pass = "midnight", hx = 3.6, hz = 1.2 },
+	{ id = "neonbarrier", name = "Neon Barrier", build = true, tier = 1, pass = "midnight", hx = 5.4, hz = 0.9 },
+	{ id = "neonlamp", name = "Neon Lamp Post", build = true, tier = 1, pass = "midnight", hx = 2.8, hz = 0.9 },
+	{ id = "checkerflag", name = "Checker Flag", build = true, tier = 1, pass = "midnight", hx = 2.6, hz = 0.8 },
+	{ id = "neondrum", name = "Neon Oil Drum", build = true, tier = 2, hx = 1.6, hz = 1.6 },
+	{ id = "litpallets", name = "Lit Pallet Stack", build = true, tier = 3, hx = 3.4, hz = 2.4 },
+	{ id = "gaugesign", name = "Gauge Sign", build = true, tier = 4, hx = 2.6, hz = 0.8 },
+	{ id = "bollards", name = "Neon Bollards", build = true, tier = 5, hx = 2.8, hz = 0.9 },
+	-- the workshop set (2026-10-15): the game's own garage, yard and roadside models
+	{ id = "toolbox", name = "Red Toolbox", path = "Workshop/ToolboxRed", tier = 1, hx = 1.6, hz = 0.9 },
+	{ id = "toolboxblue", name = "Blue Toolbox", path = "Workshop/ToolboxBlue", tier = 1, hx = 1.6, hz = 0.9 },
+	{ id = "tyrepile", name = "Tyre Pile", path = "World/Props/Tyres_Stacked_01", tier = 1, hx = 1.8, hz = 1.7 },
+	{ id = "loosetyres", name = "Loose Tyres", path = "World/Props/Tyres_Scatter_01a", tier = 1, hx = 2.9, hz = 1.8 },
+	{ id = "cone", name = "Traffic Cone", path = "World/Props/Cone_Striped", tier = 1, hx = 0.9, hz = 0.9 },
+	{ id = "rustydrum", name = "Rusty Drum", path = "World/Props/OilDrum_2", tier = 1, hx = 1.3, hz = 1.3 },
+	{ id = "anvil", name = "Anvil", path = "Workshop/Anvil", tier = 1, hx = 2.2, hz = 1.2 },
+	{ id = "bucket", name = "Quench Bucket", path = "Workshop/QuenchBucket", tier = 1, hx = 1.9, hz = 1.9 },
+	{ id = "boombox", name = "Boombox", path = "Workshop/Boombox", tier = 1, hx = 1.6, hz = 0.5 },
+	{ id = "chair", name = "Camp Chair", path = "Props/Chair", tier = 1, hx = 1.5, hz = 2.3 },
+	{ id = "workbench", name = "Workbench", path = "Workshop/Bench", tier = 2, hx = 1.9, hz = 6.1 },
+	{ id = "wheelstand", name = "Wheel Stand", path = "Workshop/WheelStand", tier = 2, hx = 1.8, hz = 3.7 },
+	{ id = "shelves", name = "Parts Shelves", path = "Workshop/Shelves", tier = 2, hx = 4.5, hz = 2.0 },
+	{ id = "airpump", name = "Air Pump", path = "Lobby/AirPoint", tier = 2, hx = 1.3, hz = 1.3 },
+	{ id = "tyrebundle", name = "Tyre Bundle", path = "World/Props/Tyres_Stacked_03", tier = 2, hx = 2.5, hz = 2.4 },
+	{ id = "tarp", name = "Covered Project", path = "Garage/TarpCover", tier = 2, hx = 2.7, hz = 2.7 },
+	{ id = "vending", name = "Vending Machine", path = "World/Obstacles/Vending", tier = 2, hx = 1.5, hz = 1.7 },
+	{ id = "engine", name = "Car Engine", path = "World/Props/CarEngine", tier = 3, hx = 3.5, hz = 3.6 },
+	{ id = "furnace", name = "Furnace", path = "Workshop/Furnace", tier = 3, hx = 2.4, hz = 2.3 },
+	{ id = "waterpump", name = "Water Pump", path = "Scenery/backroad/TubeWell", tier = 3, hx = 3.8, hz = 2.6 },
+	{ id = "wreck", name = "Car Wreck", path = "Scenery/dunes/Wreck", tier = 3, hx = 7.8, hz = 4.2 },
+	{ id = "container", name = "Shipping Container", path = "World/Props/ShippingContainer", tier = 4, hx = 9.9, hz = 3.7 },
+	{ id = "tractor", name = "Tractor", path = "Scenery/backroad/Tractor", tier = 4, hx = 6.6, hz = 5.1 },
+	{ id = "floodmast", name = "Floodlight Mast", path = "Stages/FloodLight", tier = 5, hx = 3.7, hz = 2.0 },
+	{ id = "truck", name = "Goods Truck", path = "Scenery/highway/GoodsTruck", tier = 5, hx = 10.5, hz = 3.3 },
+	-- the Roadside Decor Pack (2026-10-15): built in code (RoadDecor.luau), from the Decor Pack 2 design canvas
+	{ id = "planter", name = "Tyre Planter", build = true, tier = 1, hx = 2.5, hz = 2.5 },
+	{ id = "milestone", name = "Milestone", build = true, tier = 1, hx = 1.6, hz = 0.9 },
+	{ id = "charpai", name = "Charpai", build = true, tier = 1, hx = 3.9, hz = 1.9 },
+	{ id = "matka", name = "Matka Stand", build = true, tier = 1, hx = 3.5, hz = 1.2 },
+	{ id = "chaicart", name = "Chai Cart", build = true, tier = 2, hx = 4.5, hz = 2.0 },
+	{ id = "tyreswing", name = "Tyre Swing", build = true, tier = 2, hx = 4.1, hz = 1.9 },
+	{ id = "tyrepyramid", name = "Tyre Pyramid", build = true, tier = 2, hx = 4.7, hz = 0.8 },
+	{ id = "toran", name = "Marigold Toran", build = true, tier = 2, hx = 5.7, hz = 0.7 },
+	{ id = "scooter", name = "Old Scooter", build = true, tier = 3, hx = 3.2, hz = 1.2 },
+	{ id = "toolwall", name = "Tool Wall", build = true, tier = 3, hx = 4.3, hz = 0.6 },
+	{ id = "fuelpump", name = "Vintage Fuel Pump", build = true, tier = 4, hx = 2.2, hz = 1.3 },
+	{ id = "hornok", name = "Honk Please", build = true, tier = 5, hx = 5.9, hz = 0.6 },
+	-- the showroom (v4): your three best tyres on stands, for anyone walking past (NeonDecor builds it
+	-- from the plot's V2_Showcase)
+	{ id = "showcase", name = "Tyre Showcase", build = true, tier = 1, hx = 4.6, hz = 1.8 },
 }
 Game.YardDecorById = {}
 for _, d in ipairs(Game.YardDecor) do Game.YardDecorById[d.id] = d end
+
+-- the editor's drawer tabs: every decor kind sits in one (neon, prestige and pass pieces are "special")
+Game.DecorCats = {
+	{ id = "tools", name = "Tools" }, { id = "stock", name = "Stock" }, { id = "road", name = "Roadside" },
+	{ id = "nature", name = "Nature" }, { id = "big", name = "Big" }, { id = "special", name = "Special" },
+}
+local DECOR_CAT = {
+	jack = "tools", gantry = "tools", toolbox = "tools", toolboxblue = "tools", anvil = "tools", bucket = "tools", boombox = "tools",
+	chair = "tools", workbench = "tools", wheelstand = "tools", shelves = "tools", airpump = "tools", furnace = "tools", waterpump = "tools",
+	tyrestack = "stock", oildrum = "stock", tyrerack = "stock", tyrepile = "stock", loosetyres = "stock", rustydrum = "stock",
+	tyrebundle = "stock", tarp = "stock", vending = "stock", engine = "stock",
+	fence = "road", mailbox = "road", barrier = "road", jersey = "road", sodium = "road", guardrail = "road", streetlamp = "road",
+	roadsign = "road", cone = "road", billboard = "road", floodmast = "road",
+	haybale = "nature", mustard = "nature", tumbleweed = "nature", haystack = "nature", poplar = "nature", khejri = "nature", chhatri = "nature",
+	wreck = "big", container = "big", tractor = "big", truck = "big",
+	planter = "nature", tyreswing = "nature", toran = "nature", milestone = "road", fuelpump = "road", hornok = "road",
+	charpai = "tools", toolwall = "tools", matka = "stock", chaicart = "stock", tyrepyramid = "stock", scooter = "big",
+	showcase = "special",
+}
+for _, d in ipairs(Game.YardDecor) do
+	(d :: any).cat = DECOR_CAT[d.id] or (if d.build then "special" else "stock")
+end
+
+--==============================================================
+-- yard style (v4): why a yard is worth dressing. Every piece has style points (more for the later
+-- stages, the prestige pieces and the pass); a second copy of the same piece counts half, a third a
+-- quarter, so variety beats spam. Pieces that belong together are sets: all of a set in the yard is
+-- a big bonus, and each week one set is the theme (its pieces count double, and finishing it pays
+-- keys once that week). Floors, fences and looks add their own. The score is the yard's Style: it
+-- shows on the plot's sign, it ranks the yards, and it raises what the auto-cannon and offline time
+-- pay (Game.styleBonus), so a well-dressed yard earns while you're away.
+--==============================================================
+Game.DecorSets = {
+	{ id = "dhaba", name = "Dhaba Stop", pieces = { "charpai", "chaicart", "matka", "toran", "planter" } },
+	{ id = "workshop", name = "Workshop", pieces = { "toolbox", "anvil", "workbench", "toolwall", "shelves" } },
+	{ id = "tyreshop", name = "Tyre Shop", pieces = { "tyrestack", "tyrepile", "tyrerack", "tyrepyramid", "wheelstand" } },
+	{ id = "farm", name = "Farmyard", pieces = { "haybale", "haystack", "mustard", "poplar", "tractor" } },
+	{ id = "highway", name = "Highway Crew", pieces = { "cone", "jersey", "barrier", "guardrail", "roadsign" } },
+	{ id = "garage", name = "Back Garage", pieces = { "rustydrum", "oildrum", "engine", "tarp", "jack" } },
+	{ id = "thar", name = "Thar Desert", pieces = { "tumbleweed", "khejri", "chhatri", "wreck" } },
+	{ id = "truckstop", name = "Truck Stop", pieces = { "fuelpump", "vending", "hornok", "truck", "sodium" } },
+	{ id = "hall", name = "Hall of Fame", pieces = { "laurel", "pillar", "podium", "goldtyre" } },
+	{ id = "midnight", name = "Midnight Garage", pieces = { "neonsign", "neonarrow", "neonstack", "neoncones", "checkerflag" } },
+}
+Game.DecorSetsById = {}
+Game.DecorSetOf = {}   -- decor id -> its set
+for _, st in ipairs(Game.DecorSets) do
+	Game.DecorSetsById[st.id] = st
+	for _, k in ipairs(st.pieces) do Game.DecorSetOf[k] = st end
+end
+Game.Style = {
+	SetBonus = 40,          -- a whole set in the yard
+	ThemeKeys = 5,          -- finishing the week's theme set, once a week
+	PerPointBonus = 0.001,  -- each style point: +0.1% auto-cannon and offline pay...
+	MaxBonus = 0.6,         -- ...up to +60%
+	LevelEvery = 50,        -- a style level every 50 points
+}
+
+-- a piece's style points
+function Game.decorStyle(kind: any): number
+	if not kind then return 0 end
+	if kind.id == "showcase" then return 15 end
+	if kind.prestige then return 20 end
+	if kind.pass then return 12 end
+	return 4 + 3 * (kind.tier or 1)
+end
+
+-- the set the week is themed on (the same for everyone, by UTC week; the pass and prestige sets
+-- sit out, so the theme is something anyone can build)
+function Game.styleTheme(week: number)
+	local open = {}
+	for _, st in ipairs(Game.DecorSets) do
+		if st.id ~= "hall" and st.id ~= "midnight" then table.insert(open, st) end
+	end
+	return open[week % #open + 1]
+end
+
+-- a yard's style: the score, the sets it has whole, and how far into each set it is
+-- (layout: Game.YardLayout; look: the look id; showman: the perk's level; week: Goals.utcWeek())
+function Game.yardStyle(layout: any, look: string?, showman: number?, week: number?)
+	local theme = Game.styleTheme(week or 0)
+	local counts = {}
+	local score = 0
+	for _, d in ipairs((layout and layout.decor) or {}) do
+		local kind = Game.YardDecorById[d.k]
+		if kind then
+			counts[d.k] = (counts[d.k] or 0) + 1
+			local pts = Game.decorStyle(kind) * 0.5 ^ (counts[d.k] - 1)
+			if theme and Game.DecorSetOf[d.k] == theme then pts *= 2 end
+			score += pts
+		end
+	end
+	local distinct = 0
+	for _ in pairs(counts) do distinct += 1 end
+	score += distinct * 2
+	local sets = {}
+	local whole = {}
+	for _, st in ipairs(Game.DecorSets) do
+		local have = 0
+		for _, k in ipairs(st.pieces) do
+			if counts[k] then have += 1 end
+		end
+		sets[st.id] = have
+		if have >= #st.pieces then
+			table.insert(whole, st.id)
+			score += Game.Style.SetBonus * (if theme and st.id == theme.id then 1.5 else 1)
+		end
+	end
+	local floor = layout and Game.YardFloorsById[layout.floor or "stage"]
+	if floor and floor.id ~= "stage" then score += 6 * floor.tier end
+	local fence = layout and Game.YardFencesById[layout.fence or "stage"]
+	if fence and fence.id ~= "stage" and fence.id ~= "none" then score += 5 * fence.tier end
+	if look == "midnight" then score += 35 elseif look == "prestige" then score += 25 end
+	score *= 1 + 0.1 * (showman or 0)
+	return { score = math.floor(score + 0.5), sets = sets, whole = whole, theme = theme and theme.id or nil }
+end
+
+function Game.styleLevel(score: number): number
+	return math.floor((score or 0) / Game.Style.LevelEvery)
+end
+
+-- what a yard's style adds to its auto-cannon and offline pay (x1 .. x1.6)
+function Game.styleBonus(score: number): number
+	return 1 + math.min(Game.Style.MaxBonus, (score or 0) * Game.Style.PerPointBonus)
+end
+
+-- the yard's ground and fence (2026-10-15): "stage" follows the stage (PlotStage's own choice);
+-- the rest unlock with the stage, like decor. Materials are Roblox's own; fences are the game's models.
+Game.YardFloors = {
+	{ id = "stage", name = "Stage Ground", tier = 1 },
+	{ id = "dirt", name = "Dirt", tier = 1, mat = "Ground", variant = "TC_Dirt", color = Color3.fromRGB(255, 255, 255) },
+	{ id = "grass", name = "Grass", tier = 1, mat = "Grass", color = Color3.fromRGB(106, 140, 66) },
+	{ id = "sand", name = "Sand", tier = 1, mat = "Sand", color = Color3.fromRGB(214, 190, 140) },
+	{ id = "gravel", name = "Gravel", tier = 2, mat = "Ground", variant = "TC_Gravel", color = Color3.fromRGB(255, 255, 255) },
+	{ id = "planks", name = "Wood Planks", tier = 2, mat = "WoodPlanks", color = Color3.fromRGB(150, 112, 74) },
+	{ id = "asphalt", name = "Asphalt", tier = 2, mat = "Asphalt", color = Color3.fromRGB(62, 62, 66) },
+	{ id = "concrete", name = "Concrete", tier = 3, mat = "Concrete", color = Color3.fromRGB(176, 172, 164) },
+	{ id = "brick", name = "Brick", tier = 3, mat = "Brick", color = Color3.fromRGB(150, 78, 58) },
+	{ id = "cobble", name = "Cobblestone", tier = 3, mat = "Cobblestone", color = Color3.fromRGB(140, 136, 128) },
+	{ id = "plate", name = "Diamond Plate", tier = 4, mat = "DiamondPlate", color = Color3.fromRGB(150, 154, 160) },
+	{ id = "slate", name = "Slate", tier = 4, mat = "Slate", color = Color3.fromRGB(92, 96, 104) },
+	{ id = "pavement", name = "Pavement", tier = 5, mat = "Pavement", color = Color3.fromRGB(196, 190, 178) },
+}
+Game.YardFences = {
+	{ id = "stage", name = "Stage Fence", tier = 1 },
+	{ id = "none", name = "No Fence", tier = 1 },
+	{ id = "scrap", name = "Scrap Sheets", tier = 1, path = "Stages/ScrapFence" },
+	{ id = "field", name = "Field Fence", tier = 1, path = "Scenery/backroad/Fence" },
+	{ id = "chain", name = "Chain-link", tier = 2, path = "Lobby/ChainFence" },
+	{ id = "guardrail", name = "Guardrail", tier = 2, path = "Scenery/highway/Guardrail" },
+	{ id = "jersey", name = "Jersey Barriers", tier = 3, path = "Scenery/highway/JerseyBarrier" },
+	{ id = "palisade", name = "Palisade", tier = 4, path = "Stages/PalisadeFence" },
+}
+Game.YardFloorsById, Game.YardFencesById = {}, {}
+for _, f in ipairs(Game.YardFloors) do Game.YardFloorsById[f.id] = f end
+for _, f in ipairs(Game.YardFences) do Game.YardFencesById[f.id] = f end
 
 -- how many decor pieces a yard at `tier` can hold (a bigger yard holds more: 14, 20, 26, 32, 38)
 function Game.yardDecorMax(tier: number?): number
@@ -821,7 +1359,9 @@ function Game.yardDecorMax(tier: number?): number
 end
 
 export type YardSpot = { x: number, z: number, r: number }
-export type DecorSpot = { k: string, x: number, z: number, r: number }
+-- decor turns in 15 degree steps: `a` is its angle in steps (0-23); `r` is the quarter turn under it
+-- (kept for anything that still reads quarters, and for layouts saved before angles)
+export type DecorSpot = { k: string, x: number, z: number, r: number, a: number? }
 export type YardLayout = { [string]: any }
 
 -- a unit's footprint boxes in plot space, standing at (x, z) turned r quarter-turns
@@ -844,17 +1384,29 @@ function Game.yardBoxes(unitId: string, x: number, z: number, r: number): { { nu
 	return out
 end
 
--- a decor piece's footprint box in plot space
+-- a decor piece's angle in 15 degree steps (0-23)
+function Game.decorAngle(d: DecorSpot): number
+	if type(d.a) == "number" then return math.floor(d.a) % 24 end
+	return (math.floor(d.r or 0) % 4) * 6
+end
+
+-- a decor piece's footprint box in plot space: the box round its footprint at its angle (at a
+-- quarter turn it's the footprint itself)
 function Game.decorBox(d: DecorSpot): { number }
 	local k = Game.YardDecorById[d.k]
 	local hx, hz = (k and k.hx or 1), (k and k.hz or 1)
-	if d.r % 2 == 1 then hx, hz = hz, hx end
-	return { d.x - hx, d.z - hz, d.x + hx, d.z + hz }
+	local th = math.rad(Game.decorAngle(d) * 15)
+	local c, s = math.abs(math.cos(th)), math.abs(math.sin(th))
+	if c < 1e-6 then c = 0 end
+	if s < 1e-6 then s = 0 end
+	local bx, bz = hx * c + hz * s, hx * s + hz * c
+	return { d.x - bx, d.z - bz, d.x + bx, d.z + bz }
 end
 
 -- every unit's spot, taken from `raw` where it's a sensible number and the default otherwise; decor
--- is kept where it's a known kind, unlocked at `tier` (when given), up to the stage's allowance
-function Game.yardLayout(raw: any, tier: number?): YardLayout
+-- is kept where it's a known kind, unlocked at `tier` (when given), up to the stage's allowance;
+-- `access` ({ prestige, passes }) also drops decor its owner can't use (prestige and pass pieces)
+function Game.yardLayout(raw: any, tier: number?, access: { prestige: number?, passes: { [string]: any }? }?): YardLayout
 	local out = {}
 	local Y = Game.Yard
 	local F = Game.yardFloor(tier)
@@ -879,17 +1431,25 @@ function Game.yardLayout(raw: any, tier: number?): YardLayout
 			if #decor >= max then break end
 			local kind = type(e) == "table" and Game.YardDecorById[tostring(e.k)] or nil
 			local ex, ez, er = type(e) == "table" and tonumber(e.x), type(e) == "table" and tonumber(e.z), type(e) == "table" and tonumber(e.r)
-			if kind and ex and ez and er and ex == ex and ez == ez and (tier == nil or kind.tier <= tier) then
+			local ea = type(e) == "table" and tonumber(e.a) or nil
+			if kind and ex and ez and er and ex == ex and ez == ez and (tier == nil or kind.tier <= tier)
+				and (access == nil or Game.lookOpen(kind, access.prestige, access.passes)) then
+				local a = if ea and ea == ea then math.floor(ea) % 24 else (math.floor(er) % 4) * 6
 				table.insert(decor, {
 					k = kind.id,
 					x = math.clamp(math.floor(ex / Y.Grid + 0.5) * Y.Grid, F.x0, F.x1),
 					z = math.clamp(math.floor(ez / Y.Grid + 0.5) * Y.Grid, F.z0, F.z1),
-					r = math.floor(er) % 4,
+					r = a // 6,
+					a = a,
 				})
 			end
 		end
 	end
 	out.decor = decor
+	local rf = type(raw) == "table" and Game.YardFloorsById[tostring(raw.floor)] or nil
+	local rn = type(raw) == "table" and Game.YardFencesById[tostring(raw.fence)] or nil
+	out.floor = if rf and (tier == nil or rf.tier <= tier) then rf.id else "stage"
+	out.fence = if rn and (tier == nil or rn.tier <= tier) then rn.id else "stage"
 	return out
 end
 
@@ -973,8 +1533,11 @@ function Game.yardEncode(layout: YardLayout): string
 		if s then table.insert(parts, ("%s:%d,%d,%d"):format(u.id, s.x, s.z, s.r)) end
 	end
 	local ds = {}
-	for _, d in ipairs(layout.decor or {}) do table.insert(ds, ("%s,%d,%d,%d"):format(d.k, d.x, d.z, d.r)) end
+	for _, d in ipairs(layout.decor or {}) do table.insert(ds, ("%s,%d,%d,%d,%d"):format(d.k, d.x, d.z, d.r, Game.decorAngle(d))) end
 	if #ds > 0 then table.insert(parts, "decor=" .. table.concat(ds, "|")) end
+	if (layout.floor and layout.floor ~= "stage") or (layout.fence and layout.fence ~= "stage") then
+		table.insert(parts, ("skin=%s,%s"):format(layout.floor or "stage", layout.fence or "stage"))
+	end
 	return table.concat(parts, ";")
 end
 
@@ -986,10 +1549,12 @@ function Game.yardDecode(str: string?): YardLayout
 	local d = string.match(str or "", "decor=([^;]*)")
 	if d then
 		raw.decor = {}
-		for k, x, z, r in string.gmatch(d, "(%w+),(%-?[%d%.]+),(%-?[%d%.]+),(%d+)") do
-			table.insert(raw.decor, { k = k, x = tonumber(x), z = tonumber(z), r = tonumber(r) })
+		-- (an angle after the quarter turn, when it was saved with one)
+		for k, x, z, r, a in string.gmatch(d, "(%w+),(%-?[%d%.]+),(%-?[%d%.]+),(%d+),?(%d*)") do
+			table.insert(raw.decor, { k = k, x = tonumber(x), z = tonumber(z), r = tonumber(r), a = tonumber(a) })
 		end
 	end
+	raw.floor, raw.fence = string.match(str or "", "skin=(%w+),(%w+)")
 	return Game.yardLayout(raw)
 end
 

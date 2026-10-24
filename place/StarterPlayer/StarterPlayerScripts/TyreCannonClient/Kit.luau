@@ -77,6 +77,7 @@ Kit.Art = {
 	section = { id = "rbxassetid://108163614693478", slice = Rect.new(44, 44, 484, 64), scale = 0.5, pad = 24, h = 60 },
 	banner = { id = "rbxassetid://121811877097045", slice = Rect.new(60, 60, 600, 116), scale = 0.5, pad = 24, h = 128 },
 	glow = "rbxassetid://118235342602435",     -- the soft glow rising inside a tile (tinted)
+	radial = "rbxassetid://79653269526548",    -- a soft round glow, fading to nothing well inside its square (tinted)
 	badge = "rbxassetid://127849010951163",    -- the hotkey badge
 	close = "rbxassetid://106023319120668",
 	-- the header crest: the game's tyre (rendered in the icon studio) over the end of the banner
@@ -143,7 +144,10 @@ function Kit.fit(l: TextLabel, max: number, min: number?)
 	l.TextScaled = true
 	local c = l:FindFirstChildOfClass("UITextSizeConstraint") or UI.mk("UITextSizeConstraint", { Parent = l })
 	c.MaxTextSize = math.max(1, math.floor(max))
-	c.MinTextSize = math.min(c.MaxTextSize, min or 9)
+	-- (the floor's in screen pixels, and the whole UI is drawn smaller on a small screen: scaled the
+	-- same way, so a phone's labels shrink to fit instead of hitting the floor and wrapping)
+	local k = math.min(1, UI.scaleNow())
+	c.MinTextSize = math.min(c.MaxTextSize, math.max(4, math.floor((min or 9) * k)))
 end
 
 -- every label in a screen that doesn't fit its box (now, or when its text changes) is made to fit
@@ -169,9 +173,165 @@ end
 -- (set by Kit.header)
 local NEUTRAL = Color3.fromRGB(118, 120, 130)
 Kit.NEUTRAL = NEUTRAL
+--==============================================================
+-- living gradients: Kit.flow(gui, mode, strength, period) puts a UIGradient on gui and keeps it moving
+--   "sheen"  a bright band sweeps across now and then (buttons)
+--   "drift"  a soft light slides slowly back and forth (panel rings)
+--   "orbit"  a bright band runs round and round (whatever is selected)
+-- One RenderStepped drives them all; a gradient whose gui is gone drops out by itself.
+--==============================================================
+-- (plain tables, never weak: Roblox can collect an Instance key's Lua handle while the Instance is still
+-- on screen, and the entry would vanish: the gradient or stripes froze mid-move. Entries leave when
+-- their thing is destroyed, or is found without a parent.)
+local flows = {} :: { [UIGradient]: any }
+local lives = {} :: { [GuiObject]: any }
+local flowConn: RBXScriptConnection? = nil
+local function flowStep()
+	local now = os.clock()
+	for g, f in pairs(flows) do
+		if not g.Parent then
+			flows[g] = nil
+		elseif (g.Parent :: GuiObject).Visible ~= false then
+			local t = (now + f.phase) / f.period
+			if f.mode == "orbit" then
+				g.Rotation = (t * 360) % 360
+			elseif f.mode == "drift" then
+				-- always moving: the light slides right across and back, its angle swinging as it goes
+				g.Offset = Vector2.new(math.sin(t * math.pi * 2) * 0.62, 0)
+				g.Rotation = 20 + math.sin(t * math.pi) * 28
+			else
+				-- a slow pass, then a rest: the band crosses over the first half of the period, eased
+				local k = math.clamp((t % 1) * 2, 0, 1)
+				k = k * k * (3 - 2 * k)
+				g.Offset = Vector2.new(-1.3 + k * 2.6, 0)
+			end
+		end
+	end
+	for g, l in pairs(lives) do
+		if not g.Parent then
+			lives[g] = nil
+		elseif l.paused then
+			-- (something else is moving it for now)
+		elseif l.kind == "bob" then
+			g.Position = l.rest + UDim2.fromOffset(0, math.sin((now + l.phase) * l.speed) * l.amp)
+		elseif l.kind == "breathe" then
+			l.scale.Scale = 1 + math.sin((now + l.phase) * l.speed) * l.amp
+		elseif l.kind == "spin" then
+			-- it carries on from wherever it is, and eases up to speed (never a jump)
+			local dt = math.min(now - (l.last or now), 0.1)
+			l.last = now
+			l.ramp = math.min(1, (l.ramp or 0) + dt / 1.2)
+			local e = l.ramp * l.ramp * (3 - 2 * l.ramp)
+			g.Rotation = (g.Rotation + l.speed * e * dt) % 360
+		end
+	end
+	if next(flows) == nil and next(lives) == nil and flowConn then
+		flowConn:Disconnect()
+		flowConn = nil
+	end
+end
+
+-- a slow steady turn (degrees a second)
+function Kit.spin(g: GuiObject, speed: number?)
+	lives[g] = { kind = "spin", speed = speed or 10, phase = 0, ramp = 0 }
+	if not flowConn then flowConn = RunService.RenderStepped:Connect(flowStep) end
+end
+
+-- idle motion on the shared driver (cheap for many): a gentle bob, or a breathing scale
+function Kit.idleBob(g: GuiObject, amp: number?, speed: number?)
+	lives[g] = { kind = "bob", rest = g.Position, amp = amp or 3, speed = speed or 2.2, phase = math.random() * 10 }
+	if not flowConn then flowConn = RunService.RenderStepped:Connect(flowStep) end
+end
+
+function Kit.breathe(g: GuiObject, amp: number?, speed: number?)
+	local sc = g:FindFirstChild("KitBreathe") :: UIScale?
+	if not sc then
+		sc = Instance.new("UIScale")
+		sc.Name = "KitBreathe"
+		sc.Parent = g
+	end
+	lives[g] = { kind = "breathe", scale = sc, amp = amp or 0.03, speed = speed or 3, phase = math.random() * 10 }
+	if not flowConn then flowConn = RunService.RenderStepped:Connect(flowStep) end
+end
+
+-- stop a bob, breath or spin and put the thing back as it was
+function Kit.still(g: GuiObject)
+	lives[g] = nil
+	local sc = g:FindFirstChild("KitBreathe") :: UIScale?
+	if sc then sc.Scale = 1 end
+end
+
+-- the red "something to do" badge on a tile's corner: pops in, breathes while it's up, pops out.
+--   Kit.alert(parent) -> set(on, text?)
+function Kit.alert(parent: GuiObject, z: number?): (boolean, string?) -> ()
+	local dot = Instance.new("Frame")
+	dot.Name = "Alert"
+	dot.AnchorPoint = Vector2.new(0.5, 0.5)
+	dot.Position = UDim2.new(1, -6, 0, 6)
+	dot.Size = UDim2.fromOffset(26, 26)
+	dot.BackgroundColor3 = Color3.fromRGB(240, 52, 60)
+	dot.ZIndex = z or 20
+	dot.Visible = false
+	dot.Parent = parent
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(1, 0)
+	corner.Parent = dot
+	local st = Instance.new("UIStroke")
+	st.Color = Color3.fromRGB(14, 12, 18)
+	st.Thickness = 3
+	st.Parent = dot
+	local label = Kit.text("!", 16, Color3.new(1, 1, 1), 1.5)
+	label.Size = UDim2.fromScale(1, 1)
+	label.ZIndex = (z or 20) + 1
+	label.Parent = dot
+	Kit.breathe(dot, 0.08, 4)
+	return function(on: boolean, text: string?)
+		label.Text = text or "!"
+		if on and not dot.Visible then
+			dot.Visible = true
+			Kit.pop(dot, 0.2, 0.35)
+		elseif not on and dot.Visible then
+			dot.Visible = false
+		end
+	end
+end
+
+function Kit.flow(gui: GuiObject, mode: string?, strength: number?, period: number?): UIGradient
+	local old = gui:FindFirstChild("KitFlow")
+	if old then old:Destroy() end
+	local m = mode or "sheen"
+	local lo = 1 - (strength or 0.18)
+	local dim = Color3.new(lo, lo, lo)
+	local g = Instance.new("UIGradient")
+	g.Name = "KitFlow"
+	if m == "orbit" then m = "sheen" end
+	-- the sheen is a narrow bright band; the drift a broad soft light
+	local a, b = if m == "drift" then 0.26 else 0.38, if m == "drift" then 0.74 else 0.62
+	g.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, dim), ColorSequenceKeypoint.new(a, dim), ColorSequenceKeypoint.new(0.5, Color3.new(1, 1, 1)),
+		ColorSequenceKeypoint.new(b, dim), ColorSequenceKeypoint.new(1, dim),
+	})
+	-- diagonal: the band runs from the top-left corner down to the bottom-right
+	g.Rotation = if m == "sheen" then 35 else 20
+	g.Parent = gui
+	flows[g] = { mode = m, period = period or (if m == "drift" then 6 else 4.5), phase = math.random() * 10 }
+	if not flowConn then flowConn = RunService.RenderStepped:Connect(flowStep) end
+	return g
+end
+
+function Kit.unflow(gui: GuiObject)
+	local g = gui:FindFirstChild("KitFlow")
+	if g then
+		flows[g :: UIGradient] = nil
+		g:Destroy()
+	end
+end
+
 function Kit.panel(face: GuiObject, accent: Color3?, z: number?)
 	Kit.slice("panel_body", nil, face, z or 1, 0.6).Name = "Body"
-	Kit.slice("panel_ring", accent or C.accent, face, (z or 1) + 1, 0.6).Name = "Plate"
+	local ring = Kit.slice("panel_ring", accent or C.accent, face, (z or 1) + 1, 0.6)
+	ring.Name = "Plate"
+	Kit.flow(ring, "drift", 0.24)
 end
 
 -- cards: a panel, or with C.paper / C.well a recessed well to sit inside one
@@ -274,10 +434,12 @@ function Kit.header(face: Frame, text: string, color: Color3?, h: number?): Fram
 	t:GetPropertyChangedSignal("Text"):Connect(function() sh.Text = t.Text end)
 	t:GetPropertyChangedSignal("Position"):Connect(function() sh.Position = t.Position + UDim2.fromOffset(2, 4) end)
 	t:GetPropertyChangedSignal("TextTransparency"):Connect(function() sh.TextTransparency = 0.45 + 0.55 * t.TextTransparency end)
-	UI.mk("ImageLabel", {
+	local crestT = UI.mk("ImageLabel", {
 		Name = "Tyre", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, ty * 0.5, 0.5, 0),
 		Size = UDim2.fromOffset(ty, ty), BackgroundTransparency = 1, Image = Art.crestTyre, ZIndex = 11, Parent = band,
 	})
+	-- the tyre turns slowly while the panel's up
+	Kit.spin(crestT, 9)
 	return band
 end
 
@@ -295,6 +457,8 @@ function Kit.crestIn(band: Frame, delay: number?)
 	title:SetAttribute("Rest", lRest)
 	local stroke = title:FindFirstChildOfClass("UIStroke")
 	-- start: tyre off to the left and wound back, pennant rolled up, title hidden
+	-- (its slow idle turn waits while it rolls in, then carries on)
+	lives[tyre] = nil
 	tyre.Position = (tRest :: UDim2) - UDim2.fromOffset(170, 0)
 	tyre.Rotation = -300
 	tyre.ImageTransparency = 1
@@ -308,9 +472,9 @@ function Kit.crestIn(band: Frame, delay: number?)
 	task.delay((delay or 0) * k, function()
 		Kit.tween(tyre, 0.12, { ImageTransparency = 0 })
 		Kit.tween(tyre, 0.5, { Position = tRest }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-		local roll = Kit.tween(tyre, 0.5, { Rotation = 14 }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-		roll.Completed:Connect(function()
-			Kit.tween(tyre, 0.35, { Rotation = 0 }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+		local roll = Kit.tween(tyre, 0.6, { Rotation = 0 }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+		roll.Completed:Connect(function(state)
+			if state == Enum.PlaybackState.Completed then Kit.spin(tyre, 9) end
 		end)
 		task.delay(0.18 * k, function()
 			Kit.tween(reveal, 0.42, { Offset = Vector2.new(0.5, 0) }, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
@@ -371,6 +535,7 @@ function Kit.button(text: string, color: Color3, size: UDim2, textSize: number?)
 	local holder = UI.mk("Frame", { Name = "Holder", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 2, Parent = root })
 	local face = Kit.slice("button", color, holder, 2, math.min(0.5, (size.Y.Offset > 0 and size.Y.Offset or 48) / Art.button.h))
 	face.Name = "Face"
+	Kit.flow(face, "sheen", 0.26)
 	local sweep = shine(face, 3)
 	-- the label sits on the face with room either side, and shrinks rather than touch the edges
 	local h = size.Y.Offset > 0 and size.Y.Offset or 48
@@ -487,28 +652,49 @@ end
 -- the second pass: art/blender/icon_studio.py names coin, key, crate_backroad/highway/dunes, flag,
 -- cog, workbench and shop.
 Kit.Icon = {
-	plot = "rbxassetid://75617194165835",
-	tyre = "rbxassetid://132441359707022",
-	crate = "rbxassetid://79538710202735",
-	zones = "rbxassetid://112950866877470",
+	plot = "rbxassetid://70536972620871",
+	tyre = "rbxassetid://107471592898751",
+	crate = "rbxassetid://139786958950887",	-- icons9 (2026-10-24): the hero loot crate, lid ajar, gold light
+	zones = "rbxassetid://135216809860934",
 	key = "rbxassetid://126105696183622",
 	cash = "rbxassetid://112224652485442",
-	shop = "rbxassetid://127004312530571",
-	bench = "rbxassetid://117024553375534",
-	event = "rbxassetid://136486086110090",
-	crate_dunes = "rbxassetid://71798850722071",
-	crate_highway = "rbxassetid://73585666449045",
-	crate_backroad = "rbxassetid://79538710202735",
-	settings = "rbxassetid://111693823944212",
-	lock = "rbxassetid://137479926917187",
+	shop = "rbxassetid://84381823157588",		-- icons9 (2026-10-24): a shopping trolley with a tyre and coins
+	medal = "rbxassetid://88562823613923",		-- icons7: the level medal, hanging on its ribbon
+	bench = "rbxassetid://104249009660981",
+	event = "rbxassetid://83710834983044",
+	crate_dunes = "rbxassetid://127160896804949",
+	crate_highway = "rbxassetid://124289270334411",
+	crate_backroad = "rbxassetid://117534977551759",
+	settings = "rbxassetid://135983880522115",   -- the classic cog in steel (icons8 settings2, 2026-10-16)
+	lock = "rbxassetid://130858082381425",
 	bronze = "rbxassetid://123262345242723",
 	silver = "rbxassetid://101063235276625",
 	gold = "rbxassetid://110896553272051",
-	cannon = "rbxassetid://82387767874659",
-	fuel = "rbxassetid://138262830652175",
-	cooling = "rbxassetid://120752078418155",
-	compressor = "rbxassetid://91830884613298",
-	rack = "rbxassetid://116237732254681",
+	cannon = "rbxassetid://123409871267941",
+	fuel = "rbxassetid://107121650257693",
+	cooling = "rbxassetid://104703197405981",
+	compressor = "rbxassetid://126678045478611",
+	rack = "rbxassetid://101737130729841",
+	-- the crates with their light beam, for the big crate on the crate screen (tiles and tabs use the
+	-- plain ones above, framed like every other icon: art/ui/icon_norm.py)
+	crateBig_backroad = "rbxassetid://130583375801571",
+	crateBig_highway = "rbxassetid://135438836813489",
+	crateBig_dunes = "rbxassetid://130744416196482",
+	-- the shop (art/blender/icons8.py, 2026-10-16): a picture of its own for every pass and pack
+	pass_cash2 = "rbxassetid://84006104402093",   -- a pot of gold (2026-10-16)
+	pass_autolaunch = "rbxassetid://90820406362607",
+	pass_spares2 = "rbxassetid://77244908373090",
+	pass_lucky = "rbxassetid://116171346388921",
+	pass_vip = "rbxassetid://94369648188201",
+	keys_15 = "rbxassetid://111406598465105",
+	keys_40 = "rbxassetid://108709860587130",
+	serverluck = "rbxassetid://97395852086930",
+	starter = "rbxassetid://114118835596117",
+	premium = "rbxassetid://131506786302064",
+	-- the crate reveal's light (art/ui/burst.py): white, tinted by the rarity
+	burst_a = "rbxassetid://99517417614527",
+	burst_b = "rbxassetid://74451068344818",
+	sparkle = "rbxassetid://114056285309778",
 }
 -- older names
 Kit.Icon.wrench = Kit.Icon.plot
@@ -544,6 +730,8 @@ end
 -- a dark inside lit by a glow of that colour, the icon (a full-colour studio render) breaking out
 -- of the top, the name in heavy outlined capitals across the bottom edge, and a hotkey badge.
 -- Hover lifts it, brightens the glow and bobs the icon; press squashes it.
+local ICON_Y = 0.41	-- the tile icon's centre, down the tile (every icon is framed the same: art/ui/icon_norm.py)
+
 function Kit.tile(icon: string, label: string, color: Color3, size: number, hotkey: string?): Button
 	local root = UI.mk("TextButton", { Size = UDim2.fromOffset(size, size), BackgroundTransparency = 1, Text = "", AutoButtonColor = false })
 	local scale = UI.mk("UIScale", { Parent = root })
@@ -554,17 +742,22 @@ function Kit.tile(icon: string, label: string, color: Color3, size: number, hotk
 		Image = Art.glow, ImageColor3 = color, ImageTransparency = 0.25, ZIndex = 3, Parent = holder,
 	}, { UI.corner(math.floor(size * 0.14)) })
 	local img = UI.mk("ImageLabel", {
-		Name = "Icon", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.38), Size = UDim2.fromScale(0.96 * Kit.IconScale, 0.96 * Kit.IconScale),
+		-- inside the tile with a margin, clear of the name along the bottom
+		Name = "Icon", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, ICON_Y), Size = UDim2.fromScale(0.94 * Kit.IconScale, 0.94 * Kit.IconScale),
 		BackgroundTransparency = 1, Image = icon, ZIndex = 4, Parent = holder,
 	})
 	local l = Kit.text(string.upper(label), math.floor(size * 0.2), C.white, 3)
 	l.AnchorPoint = Vector2.new(0.5, 1)
 	l.Position = UDim2.new(0.5, 0, 1, -3)
 	l.Size = UDim2.new(1, 4, 0, math.floor(size * 0.26))
-	Kit.fit(l, size * 0.2)
+	-- one line always: a long name (WORKBENCH) shrinks to fit rather than breaking in two
+	l.TextWrapped = false
+	Kit.fit(l, size * 0.2, 6)
 	l.ZIndex = 6
 	l.Parent = holder
-	if hotkey then
+	-- (2026-10-24) no keyboard letters on a phone
+	local uis = game:GetService("UserInputService")
+	if hotkey and not (uis.TouchEnabled and not uis.KeyboardEnabled) then
 		-- the badge's square is 68 of the art's 116 px (the rest is its shadow), so the image is drawn
 		-- bigger than the square it stands for; the letter fills the square, which sits on the corner
 		local sq = math.max(20, math.floor(size * 0.24))
@@ -593,12 +786,13 @@ function Kit.tile(icon: string, label: string, color: Color3, size: number, hotk
 		face.ImageColor3 = lift(color, 0.16)
 		Kit.tween(glow, 0.16, { ImageTransparency = 0 })
 		Kit.tween(holder, 0.16, { Position = UDim2.fromOffset(0, -5) }, Enum.EasingStyle.Back)
-		-- the icon hops and settles on a little spring while you're on it
+		-- the icon hops and settles on a little spring while you're on it (its idle bob waits)
+		if lives[img] then lives[img].paused = true end
 		local t0 = os.clock()
 		if bob then bob:Disconnect() end
 		bob = RunService.RenderStepped:Connect(function()
 			local t = os.clock() - t0
-			img.Position = UDim2.new(0.5, 0, 0.38, -math.abs(math.sin(t * 7)) * 7 * math.exp(-t * 2.4))
+			img.Position = UDim2.new(0.5, 0, ICON_Y, -math.abs(math.sin(t * 7)) * 7 * math.exp(-t * 2.4))
 			img.Rotation = math.sin(t * 9) * 5 * math.exp(-t * 2.2)
 		end)
 	end)
@@ -612,7 +806,8 @@ function Kit.tile(icon: string, label: string, color: Color3, size: number, hotk
 			bob:Disconnect()
 			bob = nil
 		end
-		Kit.tween(img, 0.15, { Rotation = 0, Position = UDim2.fromScale(0.5, 0.38) })
+		Kit.tween(img, 0.15, { Rotation = 0, Position = UDim2.fromScale(0.5, ICON_Y) })
+		task.delay(0.16, function() if lives[img] then lives[img].paused = false end end)
 	end)
 	root.MouseButton1Down:Connect(function()
 		Kit.tween(holder, 0.06, { Position = UDim2.fromOffset(0, 1) })
@@ -700,7 +895,7 @@ end
 function Kit.slider(width: number, value: number, onChange: (number) -> (), color: Color3?): (Frame, (number) -> ())
 	local UserInputService = game:GetService("UserInputService")
 	local root = UI.mk("Frame", { Size = UDim2.fromOffset(width, 34), BackgroundTransparency = 1, Active = true })
-	local track, fill = Kit.bar(width, 22, color or C.accent)
+	local track, fill = Kit.bar(width, 22, color or C.accent, "active")
 	track.AnchorPoint = Vector2.new(0, 0.5)
 	track.Position = UDim2.fromScale(0, 0.5)
 	track.Parent = root
@@ -724,6 +919,7 @@ function Kit.slider(width: number, value: number, onChange: (number) -> (), colo
 	root.InputBegan:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 			dragging = true
+			Kit.barActive(fill, true)
 			Kit.tween(knob, 0.1, { Size = UDim2.fromOffset(34, 34) })
 			fromX(input.Position.X)
 		end
@@ -736,6 +932,7 @@ function Kit.slider(width: number, value: number, onChange: (number) -> (), colo
 	UserInputService.InputEnded:Connect(function(input)
 		if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
 			dragging = false
+			Kit.barActive(fill, false)
 			Kit.tween(knob, 0.14, { Size = UDim2.fromOffset(28, 28) }, Enum.EasingStyle.Back)
 		end
 	end)
@@ -858,8 +1055,6 @@ function Kit.bob(g: GuiObject, amp: number?, speed: number?): () -> ()
 		local t = os.clock() - t0
 		g.Position = rest + UDim2.fromOffset(0, math.sin(t * (speed or 3)) * (amp or 4))
 	end)
-	-- (gone with the thing it bobs, so a closed card leaves nothing running)
-	g.Destroying:Connect(function() conn:Disconnect() end)
 	return function()
 		conn:Disconnect()
 		g.Position = rest
@@ -922,6 +1117,9 @@ function Kit.dim(gui: Instance, holder: any, on: boolean)
 	end
 	dimHolders[holder] = on or nil
 	local any = next(dimHolders) ~= nil
+	-- Roblox's player list sits over the top-right corner, where every screen's close button is:
+	-- it steps aside while a screen is open and comes back in the yard
+	pcall(function() game:GetService("StarterGui"):SetCoreGuiEnabled(Enum.CoreGuiType.PlayerList, not any) end)
 	local f = dimFrame :: Frame
 	local vig = f:FindFirstChild("Vignette") :: ImageLabel?
 	if not vig then
@@ -947,23 +1145,89 @@ end
 --==============================================================
 -- bars and rings
 --==============================================================
--- every bar's stripes, scrolled together on one clock
-local stripeSet: { [ImageLabel]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+-- every bar's stripes, scrolled together on one clock, and a soft light that paces along the filled
+-- part from its start to its end, then rests and goes again: the fuller the bar, the further it goes
+local stripeSet: { [ImageLabel]: any } = {}   -- (never weak: see flows)
 local stripeConn: RBXScriptConnection? = nil
-local function scrollStripes(img: ImageLabel)
-	stripeSet[img] = true
+local stripeLast = os.clock()
+local SWEEP_SPEED = 170     -- pixels a second, so a longer fill takes longer to cross
+-- the shine is an event, not wallpaper: a bar shines once when it fills further (XP gained, a
+-- level climbed); a slider shines only while it's being dragged (Kit.barActive)
+-- (the stripes move slower than a pixel a frame, and Roblox draws a picture on whole pixels, so on
+-- its own the layer would step along a few times a second. A second copy one screen pixel ahead
+-- fades in as the first fades out, which draws it between the pixels: smooth at any frame rate.
+-- `probe` is a 100-wide frame beside them that says how big an offset pixel is on screen.)
+local function scrollStripes(img: ImageLabel, fill: Frame?, sweep: Frame?, mode: string?, img2: ImageLabel?, probe: Frame?)
+	stripeSet[img] = {
+		fill = fill, x = math.random() * 32, sweep = sweep, mode = mode or "change", active = false,
+		passing = false, sx = 0, last = fill and fill.Size.X.Scale or 0, img2 = img2, probe = probe,
+	}
 	if stripeConn then return end
 	stripeConn = RunService.RenderStepped:Connect(function()
-		local x = (os.clock() * 26) % 32
-		for s in pairs(stripeSet) do
-			if s.Parent and s.Visible then s.Position = UDim2.fromOffset(-32 + x, 0) end
+		local now = os.clock()
+		local dt = math.min(0.1, now - stripeLast)
+		stripeLast = now
+		for s, st in pairs(stripeSet) do
+			if not s.Parent then
+				stripeSet[s] = nil
+			elseif s.Visible then
+				-- the stripes drift slowly and steadily: there's life in it, no hurry
+				st.x = (st.x + dt * 7) % 32
+				local s2 = st.img2
+				local px = if st.probe then st.probe.AbsoluteSize.X / 100 else 1
+				if s2 and px > 0.05 then
+					-- whole screen pixels for both layers, and the fraction between them as a blend
+					local onScreen = st.x * px
+					local whole = math.floor(onScreen)
+					local frac = onScreen - whole
+					s.Position = UDim2.fromOffset(-32 + whole / px, 0)
+					s2.Position = UDim2.fromOffset(-32 + (whole + 1) / px, 0)
+					s.ImageTransparency = frac
+					s2.ImageTransparency = 1 - frac
+				else
+					s.Position = UDim2.fromOffset(-32 + st.x, 0)
+				end
+				local sw = st.sweep
+				if sw and st.fill then
+					local scale = st.fill.Size.X.Scale
+					local extent = st.fill.AbsoluteSize.X
+					local bw = sw.AbsoluteSize.X
+					-- what starts a pass: the bar filling further, or a slider being dragged
+					local want = if st.mode == "active" then st.active elseif st.mode == "off" then false else (scale > st.last + 0.002)
+					st.last = scale
+					if want and not st.passing and extent > 8 then
+						st.passing = true
+						st.sx = -bw
+					end
+					if st.passing then
+						sw.Visible = true
+						st.sx += SWEEP_SPEED * dt
+						sw.Position = UDim2.fromOffset(st.sx, 0)
+						if st.sx > extent then
+							st.passing = false
+							sw.Visible = false
+						end
+					else
+						sw.Visible = false
+					end
+				end
+			end
 		end
 	end)
 end
 
+-- a slider being dragged (or let go): its bar shines while it is
+function Kit.barActive(fill: Frame, on: boolean)
+	for _, st in pairs(stripeSet) do
+		if st.fill == fill then st.active = on end
+	end
+end
+
 -- a progress bar: a groove and a painted strip in it, diagonal stripes scrolling along the strip;
 -- returns the track and the fill (set the fill's Size scale X to show progress)
-function Kit.bar(width: number, height: number, color: Color3): (Frame, Frame)
+-- (sweepMode: "change", the default, shines once when the bar fills further; "active" only while
+-- Kit.barActive says so, for sliders; "off" never, for the run's gauges, which move all the time)
+function Kit.bar(width: number, height: number, color: Color3, sweepMode: string?): (Frame, Frame)
 	local track = UI.mk("Frame", { Size = UDim2.fromOffset(width, height), BackgroundTransparency = 1 })
 	Kit.slice("track", nil, track, 1, math.min(0.5, height / Art.track.h))
 	local fill = UI.mk("Frame", {
@@ -974,13 +1238,30 @@ function Kit.bar(width: number, height: number, color: Color3): (Frame, Frame)
 	local inner = UI.mk("Frame", { Size = UDim2.fromOffset(width - 6, ih), BackgroundTransparency = 1, ZIndex = 2, Parent = fill })
 	local strip = Kit.slice("fill", color, inner, 2, math.min(0.5, ih / Art.fill.h))
 	strip.Name = "Strip"
+	-- the stripes and the shine ride inside a CanvasGroup rounded like the strip: a plain frame's
+	-- clipping ignores rounded corners, and they poked out past the strip's ends as hard rectangles
+	local clip = UI.mk("CanvasGroup", {
+		Name = "Clip", Position = UDim2.fromOffset(2, 1), Size = UDim2.new(1, -4, 1, -2), BackgroundTransparency = 1, ZIndex = 3, Parent = inner,
+	}, { UI.corner(math.floor((ih - 2) / 2)) })
 	local stripes = UI.mk("ImageLabel", {
 		Name = "Stripes", Size = UDim2.new(1, 64, 1, 0), BackgroundTransparency = 1, Image = Art.stripes, ScaleType = Enum.ScaleType.Tile,
-		TileSize = UDim2.fromOffset(32, 32), ZIndex = 3, Parent = UI.mk("Frame", {
-			Position = UDim2.fromOffset(4, 2), Size = UDim2.new(1, -8, 1, -4), BackgroundTransparency = 1, ClipsDescendants = true, ZIndex = 3, Parent = inner,
-		}, { UI.corner(math.floor(ih / 2)) }),
+		TileSize = UDim2.fromOffset(32, 32), ZIndex = 3, Parent = clip,
 	})
-	scrollStripes(stripes)
+	-- the light that paces along the fill (the fill clips it to what's filled)
+	local sweep = UI.mk("Frame", {
+		Name = "Sweep", Size = UDim2.new(0, math.max(28, math.floor(width * 0.14)), 1, 0), BackgroundColor3 = Color3.new(1, 1, 1),
+		BorderSizePixel = 0, Visible = false, ZIndex = 4, Parent = clip,
+	})
+	UI.mk("UIGradient", {
+		Rotation = 0,
+		Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.5, 0.45), NumberSequenceKeypoint.new(1, 1) }), Parent = sweep,
+	})
+	local stripes2 = stripes:Clone()
+	stripes2.Name = "Stripes2"
+	stripes2.ImageTransparency = 1
+	stripes2.Parent = clip
+	local probe = UI.mk("Frame", { Name = "Probe", Size = UDim2.fromOffset(100, 0), BackgroundTransparency = 1, Parent = clip })
+	scrollStripes(stripes, fill, sweep, sweepMode, stripes2, probe)
 	-- colour changes on the fill reach the strip
 	fill:GetPropertyChangedSignal("BackgroundColor3"):Connect(function() strip.ImageColor3 = fill.BackgroundColor3 end)
 	-- the fill's size is set as a share of the track; keep it inside the groove's inset

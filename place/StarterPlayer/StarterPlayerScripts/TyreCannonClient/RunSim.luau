@@ -21,6 +21,7 @@ local SoundService = game:GetService("SoundService")
 local Debris = game:GetService("Debris")
 
 local Modules = ReplicatedStorage:WaitForChild("TyreCannon"):WaitForChild("Modules")
+local Remotes = ReplicatedStorage:WaitForChild("TyreCannon"):WaitForChild("Remotes")
 local Config = require(Modules.Config)
 local RunPhysics = require(Modules.RunPhysics)
 local RunCamera = require(Modules.RunCamera)
@@ -28,6 +29,7 @@ local TrackGen = require(Modules.TrackGen)
 local WheelAssembly = require(Modules:WaitForChild("WheelAssembly"))
 local Game = require(Modules:WaitForChild("Game"))
 local TyreLook = require(script.Parent:WaitForChild("TyreLook"))
+local PrestigeLook = require(script.Parent.PrestigeLook)
 local Kit = require(script.Parent:WaitForChild("Kit"))
 local TyreSkills = require(script.Parent:WaitForChild("TyreSkills"))
 local SkillZones = require(script.Parent:WaitForChild("SkillZones"))
@@ -64,6 +66,17 @@ end
 
 local RunSim = {}
 RunSim.__index = RunSim
+
+-- the stamps a spectator sees too (Spectator replays them on its own HUD); the rest are the runner's
+local STREAM_EVENTS = {
+	bounce = true, tuck = true, skillzone = true, smooth = true, skim = true, chainlost = true, braced = true,
+	rough = true, bump = true, crash = true, hit = true, smash = true, pad = true, dustdevil = true,
+	checkpoint = true, skill = true, key = true,
+}
+-- and the road's reactions (WorldView calls), so the watcher's coins, keys, targets and smashables go too
+local STREAM_WORLD = {
+	"targetHit", "shatter", "knock", "padFX", "markMetalCollected", "markKeyCollected", "markCollected", "markToolCollected", "gateFX",
+}
 
 local function lerp(a: number, b: number, t: number): number
 	return a + (b - a) * t
@@ -114,6 +127,8 @@ local function buildTyre(parent: Instance, opts)
 			name = "PlayerTyre",
 		})
 	end
+	-- the prestige lip (PrestigeLook): this run's own player's level unless the caller says whose
+	PrestigeLook.dressTyre(model, opts.prestige or (game:GetService("Players").LocalPlayer:GetAttribute("Prestige") :: number?))
 	local root = model.PrimaryPart :: BasePart
 	local skin = Config.SkinsById[opts.skin or "stock"] or Config.SkinsById.stock
 
@@ -158,9 +173,22 @@ end
 --==============================================================
 -- start
 --==============================================================
+-- how many are watching this player's run (Main sets it from the server's SpectatorCount); while
+-- anyone is, the run sends its pose ten times a second for them (Spectator rebuilds the road)
+RunSim.watchers = 0
+
 function RunSim.start(opts)
 	local self = setmetatable({}, RunSim)
 	self.trackId = opts.trackId
+	self.streamInfo = {
+		tyre = opts.tyreId, skin = opts.skin, rim = opts.rim, best = opts.best,
+		prestige = opts.prestige or game:GetService("Players").LocalPlayer:GetAttribute("Prestige"),
+	}
+	-- the tyre's design goes to spectators too, unless it's too big for a stream frame
+	if opts.design ~= nil then
+		local ok, json = pcall(function() return game:GetService("HttpService"):JSONEncode(opts.design) end)
+		if ok and #json <= 5000 then self.streamInfo.design = opts.design end
+	end
 	self.track = TrackGen.get(opts.trackId)
 	-- the hills grow with the stage, so a faster tyre still has hills to ride (TrackGen:rollerHeight)
 	self.track.hillScale = (opts.stats.stage or 1) ^ 2
@@ -174,6 +202,17 @@ function RunSim.start(opts)
 	self.onEvent = function(e)
 		self.lastEventKind = e and e.kind
 		onEvent(e)
+		-- whoever's watching gets the same stamps: the next stream frame carries them
+		if (RunSim.watchers or 0) > 0 and type(e) == "table" and STREAM_EVENTS[e.kind] then
+			local q = self.streamEvents or {}
+			self.streamEvents = q
+			if #q < 8 then
+				table.insert(q, {
+					kind = e.kind, chain = e.chain, combo = e.combo, perfect = e.perfect, what = e.what, tucked = e.tucked,
+					ready = e.ready, name = e.name, total = e.total, tier = e.tier, metres = e.metres, zoneName = e.zoneName,
+				})
+			end
+		end
 	end
 	self.onEnd = opts.onEnd
 
@@ -283,6 +322,26 @@ function RunSim.start(opts)
 	self.world = WorldView.new(opts.trackId)
 	pcall(function() self.world:markBest(opts.best, opts.bestName) end)
 	self.world:ensure(self.x)
+	for _, op in ipairs(STREAM_WORLD) do
+		local world = self.world :: any
+		local orig = world[op]
+		if type(orig) == "function" then
+			world[op] = function(w, a, b)
+				if (RunSim.watchers or 0) > 0 then
+					local q = self.streamWorld or {}
+					self.streamWorld = q
+					if #q < 48 then
+						table.insert(q, {
+							op = op,
+							a = if typeof(a) == "Vector3" then { a.X, a.Y, a.Z } else a,
+							b = if typeof(b) == "Vector3" then { b.X, b.Y, b.Z } else b,
+						})
+					end
+				end
+				return orig(w, a, b)
+			end
+		end
+	end
 
 	local folder = Instance.new("Folder")
 	folder.Name = "TyreCannonRun"
@@ -370,10 +429,17 @@ function RunSim.start(opts)
 	end
 	self.weather = Weather.start(opts.trackId, folder)
 	self.camera.CFrame = self.camCF
+	self.camera.Focus = CFrame.new(self.x, self.y, self.z)
 	self.dust.Color = ColorSequence.new(self.tcfg.ground)
 
 	self.skills = TyreSkills.new(self, self.stats, opts.hudGui)
 	self.zones = SkillZones.new(self, self.stats.skill)
+	-- (2026-10-24) 1st Person picked in Settings started the run inside the tyre: it was only hidden on V
+	if self.view == "first" and self.model then
+		for _, d in ipairs(self.model:GetDescendants()) do
+			if d:IsA("BasePart") then d.LocalTransparencyModifier = 1 end
+		end
+	end
 	self:bindInput()
 	self.accumulator = 0
 	self.conn = RunService.RenderStepped:Connect(function(dt)
@@ -386,6 +452,9 @@ function RunSim.start(opts)
 	self.splits = {}
 	self.startX = startX
 	self.ghost = decodeGhost(opts.ghost)
+	-- (a ghost that set off from somewhere else on the road, say a run started at a later zone, would
+	-- only trail far behind or far ahead: it isn't raced)
+	if self.ghost and math.abs(self.ghost.samples[1][1] - startX) > 400 then self.ghost = nil end
 	if self.ghost then self:buildGhost(opts.tyreId) end
 	-- the other players' best runs, racing alongside: it always feels like someone's out there
 	self.rivals = {}
@@ -438,9 +507,11 @@ function RunSim:buildGhost(tyreId: string?, rivalName: string?)
 			d.CanQuery = false
 			d.CanTouch = false
 			d.CastShadow = false
-			d.Material = Enum.Material.SmoothPlastic
+			-- (2026-10-16) a shimmering ForceField body, not a near-invisible one: from the chase camera
+			-- a tyre is seen almost edge-on, and at 0.9 transparency the ghost was only its plate
+			d.Material = Enum.Material.ForceField
 			d.Color = fillC
-			d.Transparency = 0.9
+			d.Transparency = 0
 		end
 	end
 	model.Parent = self.folder
@@ -464,10 +535,10 @@ function RunSim:buildGhost(tyreId: string?, rivalName: string?)
 		a1.Parent = root
 		local tr = Instance.new("Trail")
 		tr.Attachment0, tr.Attachment1 = a0, a1
-		tr.Lifetime = 0.35
-		tr.LightEmission = 0.4
+		tr.Lifetime = 0.6
+		tr.LightEmission = 0.7
 		tr.Color = ColorSequence.new(fillC)
-		tr.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.55), NumberSequenceKeypoint.new(1, 1) })
+		tr.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0.35), NumberSequenceKeypoint.new(1, 1) })
 		tr.WidthScale = NumberSequence.new(1, 0.2)
 		tr.FaceCamera = true
 		tr.Parent = root
@@ -513,15 +584,33 @@ function RunSim:buildGhost(tyreId: string?, rivalName: string?)
 	self.ghostFade = 0.62
 end
 
--- where the best run was at a moment of run time: distance, height off the ground, sideways
-function RunSim:ghostAt(t: number, ghost: any?): (number, number, number)
+-- where the best run was at a moment of run time: distance, height off the ground, sideways, and
+-- its heading. (2026-10-16) A curve through the samples (Catmull-Rom), not straight lines between
+-- them: with a sample every half second the straight lines made a jump's arc a row of kinks, and
+-- without a heading the ghost slid sideways across the road instead of turning.
+local function catmull(p0: number, p1: number, p2: number, p3: number, k: number): number
+	local k2, k3 = k * k, k * k * k
+	return 0.5 * (2 * p1 + (p2 - p0) * k + (2 * p0 - 5 * p1 + 4 * p2 - p3) * k2 + (3 * p1 - p0 - 3 * p2 + p3) * k3)
+end
+
+function RunSim:ghostAt(t: number, ghost: any?): (number, number, number, number)
 	local s = (ghost or self.ghost).samples
+	local n = #s
 	local f = t / GHOST_DT + 1
-	local i = math.clamp(math.floor(f), 1, #s)
-	local j = math.min(i + 1, #s)
+	local i = math.clamp(math.floor(f), 1, n)
 	local k = math.clamp(f - i, 0, 1)
-	local a, b = s[i], s[j]
-	return a[1] + (b[1] - a[1]) * k, a[2] + (b[2] - a[2]) * k, a[3] + (b[3] - a[3]) * k
+	local a, b = s[math.max(1, i - 1)], s[i]
+	local c, d = s[math.min(n, i + 1)], s[math.min(n, i + 2)]
+	local x = catmull(a[1], b[1], c[1], d[1], k)
+	local h = catmull(a[2], b[2], c[2], d[2], k)
+	local z = catmull(a[3], b[3], c[3], d[3], k)
+	-- heading from just ahead on the same curve
+	local k2 = math.min(1, k + 0.05)
+	local x2 = catmull(a[1], b[1], c[1], d[1], k2)
+	local z2 = catmull(a[3], b[3], c[3], d[3], k2)
+	local dx, dz = x2 - x, z2 - z
+	local yaw = if dx * dx + dz * dz > 1e-4 then math.atan2(dz, dx) else 0
+	return x, h, z, yaw
 end
 
 --==============================================================
@@ -582,18 +671,26 @@ function RunSim:bindInput()
 	local function down(input: InputObject, gpe: boolean)
 		if self.finished then return end
 		local k = input.KeyCode
+		-- (2026-10-18: chat first; typing a V in chat used to flip the camera)
+		if gpe then return end
 		if k == K.V then
 			self:toggleView()
 			return
 		end
-		if gpe then return end
 		if k == K.Space or k == K.ButtonR2 or k == K.ButtonA then self.keys.boost = true
 		elseif k == K.LeftShift or k == K.LeftControl or k == K.ButtonL2 or k == K.ButtonB then self.keys.tuck = true
 		elseif k == K.W or k == K.Up then self.keys.climb = true
 		elseif k == K.S or k == K.Down then self.keys.dive = true
 		elseif k == K.A or k == K.Left then self.keys.left = true
 		elseif k == K.D or k == K.Right then self.keys.right = true
-		elseif k == K.Q or k == K.ButtonSelect then self:bail()
+		elseif k == K.Q or k == K.ButtonSelect then
+			-- (2026-10-24) a 0.6 s hold: Q sits next to W, A and Shift, and a brush of it ended the run
+			local at = os.clock()
+			self.bailAt = at
+			self.onEvent({ kind = "bailhold" })
+			task.delay(0.6, function()
+				if self.bailAt == at and not self.finished then self:bail() end
+			end)
 		elseif k == K.E or k == K.ButtonY then self.skills:input(true)
 		end
 		local t = input.UserInputType
@@ -609,6 +706,7 @@ function RunSim:bindInput()
 		elseif k == K.A or k == K.Left then self.keys.left = false
 		elseif k == K.D or k == K.Right then self.keys.right = false
 		elseif k == K.E or k == K.ButtonY then self.skills:input(false)
+		elseif k == K.Q or k == K.ButtonSelect then self.bailAt = nil
 		end
 		local t = input.UserInputType
 		if t == Enum.UserInputType.MouseButton1 then self.keys.boost = false
@@ -675,6 +773,7 @@ function RunSim:updateAim(dt: number)
 	local inv = (Prefs.get("invertpitch") == true) and -1 or 1
 	local sens = 0.4 + (tonumber(Prefs.get("sens")) or 0.5) * 1.2
 	local pitchTouched = self.mouseDY ~= 0
+	local yawTouched = self.mouseDX ~= 0
 	if self.mouseLook and (self.mouseDX ~= 0 or self.mouseDY ~= 0) then
 		self.aimYaw += self.mouseDX * F.MouseSens * sens
 		self.aimPitch += -self.mouseDY * F.MouseSens * sens * inv
@@ -690,6 +789,16 @@ function RunSim:updateAim(dt: number)
 		self.idleT = 0
 	else
 		self.idleT += dt
+	end
+	-- (2026-10-24) the heading eases back down the road when nothing has steered for a moment: it used
+	-- to hold wherever it was left, and the tyre ran on at an angle, losing ground
+	if ix == 0 and not yawTouched then
+		self.yawIdle = (self.yawIdle or 0) + dt
+		if self.yawIdle > 0.3 then
+			self.aimYaw += (0 - self.aimYaw) * math.min(1, dt * (if self.mouseLook then 0.9 else 1.6))
+		end
+	else
+		self.yawIdle = 0
 	end
 	-- the nose (float / dive, in the air) comes back to level when nothing is holding it
 	if iy == 0 and not pitchTouched then
@@ -989,6 +1098,8 @@ function RunSim:step(dt: number)
 	ctx.fatigue = 1
 	if self.runTime > F.FatigueStart then
 		ctx.fatigue = 1 + (self.runTime - F.FatigueStart) * F.FatigueRate
+		-- (2026-10-24) said once: the drag climbing from here on was invisible
+		if not self.fatigued then self.onEvent({ kind = "headwind" }) end
 		self.fatigued = true
 	end
 
@@ -1001,6 +1112,8 @@ function RunSim:step(dt: number)
 	inp.slam = sk.pounding == true
 	local res = RunPhysics.step(self, inp, ctx, self.terrain, F, dt)
 	if res.landing then self:onLanding(res.landing) end
+	-- a speed bump: tucked it's free, untucked it cost speed (RunPhysics)
+	if res.bump then self.onEvent({ kind = "bump", tucked = res.bumpTucked == true }) end
 	local s = self.speed
 	local vyTot = math.sin(self.pitch) * s
 	self.fall = 0
@@ -1091,7 +1204,8 @@ function RunSim:step(dt: number)
 			self.hitFlash = 1
 			self.z += ((self.z >= tgt.z) and 1 or -1) * 6
 			if self.chain > 0 then self:breakChain("hit") end
-			playSound("rbxassetid://9114065998", 0.7, 0.8)
+			-- (2026-10-23: a dial-switch tick was playing here) Metal Crash 4, Pro Sound Effects
+			playSound("rbxassetid://9116547504", 0.6, 1.0)
 			self.onEvent({ kind = "hit" })
 		end
 	end
@@ -1120,7 +1234,8 @@ function RunSim:step(dt: number)
 						self.metals.bronze += 3
 						self.onEvent({ kind = "metal", metal = "bronze", amount = 3 })
 					end
-					playSound("rbxassetid://9114065998", 0.8, 1.25)
+					-- (2026-10-23) Wood Break 1, Pro Sound Effects (was a dial-switch tick)
+					playSound("rbxassetid://9120801590", 0.8, 1.1)
 					self.onEvent({ kind = "smash", total = self.smashes })
 				end
 			end
@@ -1134,7 +1249,8 @@ function RunSim:step(dt: number)
 					self.grounded = false
 					self.pads += 1
 					self.world:padFX(d.key)
-					playSound("rbxassetid://9120386436", 0.6, 1.35)
+					-- (2026-10-23) a fast whoosh for the boost (a car horn was playing here)
+					playSound("rbxassetid://9114373663", 0.7, 1.05)
 					self.onEvent({ kind = "pad" })
 				end
 			end
@@ -1166,7 +1282,8 @@ function RunSim:step(dt: number)
 			if ddx * ddx + ddy * ddy + ddz * ddz <= coinReach * coinReach then
 				self.world:markMetalCollected(key)
 				self.metals[d.kind] = (self.metals[d.kind] or 0) + d.amount
-				playSound("rbxassetid://9125402735", 0.55, d.kind == "gold" and 1.7 or (d.kind == "silver" and 1.4 or 1.15))
+				-- (2026-10-23) a jingle for the pickup, brighter for the better metal (a deep boom was playing here)
+				playSound("rbxassetid://9113849492", 0.45, d.kind == "gold" and 1.35 or (d.kind == "silver" and 1.18 or 1.0))
 				self.onEvent({ kind = "metal", metal = d.kind, amount = d.amount })
 			end
 		end
@@ -1182,7 +1299,7 @@ function RunSim:step(dt: number)
 			if ddx * ddx + ddy * ddy + ddz * ddz <= keyReach * keyReach then
 				self.world:markKeyCollected(key)
 				self.keysGot += 1
-				playSound("rbxassetid://9125402735", 0.9, 1.5)
+				playSound("rbxassetid://9113849492", 0.7, 1.5)
 				self.onEvent({ kind = "key", total = self.keysGot })
 			end
 		end
@@ -1243,7 +1360,24 @@ function RunSim:step(dt: number)
 	else
 		self.stopTimer = 0
 	end
-	if self.runTime > Config.Economy.MaxRunSeconds then self:finish("timeout") end
+	-- (2026-10-24) the roll-out: on the ground, under 15% of the run's top speed and not boosting for
+	-- 2.5 s, the run is over. Slow rolling kept itself going on the hills for 10-15 s at the end of
+	-- every run.
+	if not self.finished and self.grounded and not nitroOn and self.runTime > 6
+		and self.speed < math.max(F.MinSpeed * 1.5, self.maxSpeed * 0.15) then
+		self.rollT = (self.rollT or 0) + dt
+		if self.rollT >= 1 and not self.rollWarned and self.nitro > 1 and not self.nitroDry then
+			self.rollWarned = true
+			self.onEvent({ kind = "rollout" })
+		end
+		if self.rollT >= 2.5 then
+			if self.skills:rebirth("stop") then self.rollT = 0 else self:finish("stopped") end
+		end
+	else
+		self.rollT = 0
+		self.rollWarned = nil
+	end
+	if not self.finished and self.runTime > Config.Economy.MaxRunSeconds then self:finish("timeout") end
 
 	-- the velocity the skills see, and a guard against a NaN freezing the run for good
 	local cp3 = math.cos(self.pitch)
@@ -1302,8 +1436,7 @@ function RunSim:paintTuck(cue: string?, dt: number)
 	self.glowFill = (self.glowFill or 1) + (fill - (self.glowFill or 1)) * k
 	self.glowLine = (self.glowLine or 1) + (line - (self.glowLine or 1)) * k
 	self.glowCol = (self.glowCol or col):Lerp(col, k)
-	-- (not in first person: the camera's inside the tyre there)
-	local on = (self.glowFill < 0.98 or self.glowLine < 0.98) and self.view ~= "first"
+	local on = self.glowFill < 0.98 or self.glowLine < 0.98
 	if hl.Enabled ~= on then hl.Enabled = on end
 	if on then
 		hl.FillColor = self.glowCol
@@ -1313,8 +1446,41 @@ function RunSim:paintTuck(cue: string?, dt: number)
 	end
 end
 
+-- one frame for whoever's watching (Spectator): where the tyre is and how it's riding (heading, pitch,
+-- lean, on the ground or not), what the HUD shows (speed, nitro, the chain, the moves, coins, keys),
+-- the stamps since the last frame, and what it takes to build the same road (seed, hills, skill zones,
+-- the run's keys, its target rate, where it started). The tyre's design rides along every 20th frame
+-- (it's the biggest part), so someone who starts watching late still gets it.
+function RunSim:stream(dt: number)
+	if (RunSim.watchers or 0) <= 0 then return end
+	self.streamAt = (self.streamAt or 0) - dt
+	if self.streamAt > 0 then return end
+	self.streamAt = 0.1
+	self.streamN = (self.streamN or 0) + 1
+	local info = self.streamInfo or {}
+	local trk = self.track
+	local payload = {
+		t = self.trackId, sd = trk.runSeed, hs = trk.hillScale, kk = trk.skillKind, ka = trk.keyAllow, tg = trk.targetRate,
+		sx = self.startX, bx = info.best,
+		x = self.x, y = self.y, z = self.z, roll = self.roll, yw = self.yaw, pt = self.pitch, bk = self.bank,
+		g = self.grounded == true, sp = self.speed or 0, d = self.x, tr = self.zone or 1,
+		nb = self.usingBoost == true, nf = (self.nitro or 0) / math.max(1, self.nitroMax or 1), nd = self.nitroDry == true,
+		ch = self.chain, cm = self.combo, tk = self.tucking == true, rt = self.runTime,
+		fl = (self.aimPitch or 0) > 0.15 and not self.grounded, dv = (self.aimPitch or 0) < -0.15 and not self.grounded,
+		mt = self.metals, kg = self.keysGot,
+		ty = info.tyre, sk = info.skin, rm = info.rim, pr = info.prestige,
+		ev = self.streamEvents, wo = self.streamWorld, cu = self.tuckCue,
+		ck = os.clock(), -- the runner's clock, so the watcher can space the frames as they were sent
+	}
+	self.streamEvents = nil
+	self.streamWorld = nil
+	if info.design ~= nil and self.streamN % 20 == 1 then payload.ds = info.design end
+	pcall(function() Remotes.RunState:FireServer(payload) end)
+end
+
 function RunSim:frame(dt: number)
 	if self.finished then return end
+	self:stream(dt)
 	-- the watchdog: a run that hasn't moved a stud in 6 real seconds is over, whatever caused it
 	if math.abs(self.x - (self.wdX or -1)) > 1 then
 		self.wdX = self.x
@@ -1340,7 +1506,7 @@ function RunSim:frame(dt: number)
 	end
 	if self.finished then return end
 
-	self.world:ensure(self.x)
+	self.world:ensure(self.x, 1)
 	self.world:update(dt, self.x)
 	self.skills:frame(dt)
 	if self.zones then self.zones:frame(dt) end
@@ -1377,10 +1543,16 @@ function RunSim:frame(dt: number)
 	-- the ghost rolls along its own line on this road
 	local ghostX = nil
 	if self.ghost and self.ghostModel then
-		local gx, ga, gz = self:ghostAt(self.runTime)
+		local gx, ga, gz, gyaw = self:ghostAt(self.runTime)
 		ghostX = gx
+		-- (2026-10-16) the moment you pass your best: once a run, after you've been behind it
+		if self.x < gx - 6 then self.behindGhost = true end
+		if self.behindGhost and not self.passedGhost and self.x > gx + 4 and self.runTime > 3 then
+			self.passedGhost = true
+			self.onEvent({ kind = "ghostpass" })
+		end
 		local gy = self.track:heightAt(gx) + R + math.max(0, ga)
-		self.ghostModel:PivotTo(CFrame.new(gx, gy, gz) * CFrame.Angles(0, 0, -(gx / R)))
+		self.ghostModel:PivotTo(CFrame.new(gx, gy, gz) * CFrame.Angles(0, -math.clamp(gyaw, -0.6, 0.6), 0) * CFrame.Angles(0, 0, -(gx / R)))
 		local toCam = (Vector3.new(gx, gy, gz) - self.camera.CFrame.Position).Magnitude
 		local fade = 0.62 + 0.33 * math.clamp(1 - (toCam - 30) / 60, 0, 1)
 		if math.abs(fade - self.ghostFade) > 0.02 and self.ghostHighlight then
@@ -1392,9 +1564,9 @@ function RunSim:frame(dt: number)
 
 	for _, rv in ipairs(self.rivals or {}) do
 		if rv.model then
-			local gx, ga, gz = self:ghostAt(self.runTime, rv.ghost)
+			local gx, ga, gz, gyaw = self:ghostAt(self.runTime, rv.ghost)
 			local gy = self.track:heightAt(gx) + R + math.max(0, ga)
-			rv.model:PivotTo(CFrame.new(gx, gy, gz) * CFrame.Angles(0, 0, -(gx / R)))
+			rv.model:PivotTo(CFrame.new(gx, gy, gz) * CFrame.Angles(0, -math.clamp(gyaw, -0.6, 0.6), 0) * CFrame.Angles(0, 0, -(gx / R)))
 			local toCam = (Vector3.new(gx, gy, gz) - self.camera.CFrame.Position).Magnitude
 			local fade = 0.7 + 0.27 * math.clamp(1 - (toCam - 30) / 60, 0, 1)
 			if rv.hl and math.abs(fade - rv.fade) > 0.02 then
@@ -1462,6 +1634,9 @@ function RunSim:frame(dt: number)
 	local shakeCF = CFrame.new((math.random() - 0.5) * sh * 2.0, (math.random() - 0.5) * sh * 2.0, 0)
 		* CFrame.Angles(0, 0, (math.random() - 0.5) * sh * 0.012 + math.sin((1 - self.gateLean) * math.pi) * self.gateLean * 0.14)
 	self.camera.CFrame = self.camCF * shakeCF
+	-- the engine draws detail round Camera.Focus, which otherwise stays on your character back in the
+	-- yard: tens of thousands of studs down the road (the Highway, the Dunes) the world stops drawing
+	self.camera.Focus = CFrame.new(pos)
 	fov += self.gateLean * 8 + (self.skills and self.skills.fovAdd or 0)
 	self.camera.FieldOfView += (fov - self.camera.FieldOfView) * math.min(1, dt * 6)
 
@@ -1533,7 +1708,10 @@ end
 function RunSim:finish(reason: string)
 	if self.finished then return end
 	self.finished = true
-	if workspace:GetAttribute("PaceLog") then
+	-- whoever's watching sees the run end
+	if (RunSim.watchers or 0) > 0 then pcall(function() Remotes.RunState:FireServer({ done = true, d = self.x, why = reason }) end) end
+	-- (the pace log is a Studio tuning tool: never in a live server's console)
+	if workspace:GetAttribute("PaceLog") and RunService:IsStudio() then
 		print(("[PACE] %s bot=%s %.0fm %.1fs max=%.0f air=%.1fs chain=%d"):format(reason, tostring(self.bot), self.x * P.StudsToMetres, self.runTime, self.maxSpeed, self.longestAir, self.peakChain))
 		workspace:SetAttribute("PaceResult", ("%s %s %.0fm %.1fs max%.0f chain%d | "):format(reason, tostring(self.bot), self.x * P.StudsToMetres, self.runTime, self.maxSpeed, self.peakChain) .. table.concat(self.paceLog or {}, " ; "))
 	end
@@ -1587,6 +1765,7 @@ function RunSim:finish(reason: string)
 		startX = self.startX,
 		bounces = self.bounces, perfects = self.perfects, goods = self.goods, skids = self.skids,
 		peakChain = self.peakChain, comboMetres = self.comboMetres,
+		zoneSmashes = self.zoneSmashes or 0, zoneBonus = self.zoneBonus or 0,
 		photo = self.photo and {
 			x = self.photo.x, y = self.photo.y, z = self.photo.z, vx = self.photo.vx, vy = self.photo.vy,
 			roll = self.photo.roll, air = self.photo.air, speed = self.photo.speed,

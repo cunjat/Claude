@@ -183,7 +183,8 @@ function LaunchShow:buildEffects()
 			self.smoke = smoke
 		end
 	end
-	self.engineLoop = sound("rbxassetid://9112854440", 0.22, 0.55, true)
+	-- (2026-10-23: a diesel idle, was rain on leaves)
+	self.engineLoop = sound("rbxassetid://71949512559141", 0.1, 0.9, true)
 end
 
 function LaunchShow:applyCharms(charmIds)
@@ -259,8 +260,8 @@ function LaunchShow:step(dt: number)
 	for _, e in ipairs(self.emitters) do e.Rate = spin * 45 end
 	if self.smoke then self.smoke.Rate = 3 + spin * 34 end
 	if self.engineLoop then
-		self.engineLoop.Volume = 0.18 + spin * 0.5
-		self.engineLoop.PlaybackSpeed = 0.5 + spin * 1.5
+		self.engineLoop.Volume = 0.1 + spin * 0.25
+		self.engineLoop.PlaybackSpeed = 0.9 + spin * 0.75
 	end
 end
 
@@ -306,7 +307,7 @@ function LaunchShow:celebrate()
 	end
 	local hum = self.op:FindFirstChildOfClass("Humanoid")
 	local animator = hum and hum:FindFirstChildOfClass("Animator")
-	local id = Config.Animations.victory
+	local id = require(script.Parent.AnimIds).get("victory")
 	if animator and type(id) == "string" and id ~= "" then
 		local a = Instance.new("Animation")
 		a.AnimationId = id
@@ -375,7 +376,9 @@ function LaunchShow:release(power: number, quality: number)
 	local z = TYRE_LOCAL.Z
 	local duration = lerp(1.9, 0.8, math.clamp(quality, 0, 1))
 	local wobble = (1 - math.clamp(quality, 0, 1)) * 0.5
-	sound("rbxassetid://9118823101", 1, 0.55 + quality * 0.5)
+	-- (2026-10-23: the boom, was a pair of shears) a better shot booms deeper and longer
+	sound("rbxassetid://9114036511", 0.85, 1.05 - quality * 0.15)
+	sound("rbxassetid://9125402735", 0.3 + quality * 0.35, 1.1 - quality * 0.2)
 	-- the shove lands: a beat's hold and a puff of dust off the cradle
 	local from = base * CFrame.new(TYRE_LOCAL - Vector3.new(0, TYRE_RADIUS - 0.4, 0))
 	PackFX.burst("dustPuff", from, math.floor(10 + quality * 12), DUST, 1.1)

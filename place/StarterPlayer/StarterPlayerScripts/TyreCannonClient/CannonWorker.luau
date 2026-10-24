@@ -166,9 +166,11 @@ function CannonWorker:goOut(plot: Instance): Model?
 	y.worker = m
 	local hum = m:FindFirstChildOfClass("Humanoid") :: Humanoid
 	local animator = hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum)
-	y.walkTrack = load(animator :: Animator, Config.Animations.walk, true)
-	y.idleTrack = load(animator :: Animator, Config.Animations.idle, true)
-	y.pressTrack = load(animator :: Animator, Config.Animations.land, false)
+	local AnimIds = require(script.Parent.AnimIds)
+	AnimIds.wait()
+	y.walkTrack = load(animator :: Animator, AnimIds.get("walk"), true)
+	y.idleTrack = load(animator :: Animator, AnimIds.get("idle"), true)
+	y.pressTrack = load(animator :: Animator, AnimIds.get("land"), false)
 	fadeIn(m, true, 0.35)
 	task.wait(0.2)
 	if y.walkTrack then y.walkTrack:Play(0.15) end

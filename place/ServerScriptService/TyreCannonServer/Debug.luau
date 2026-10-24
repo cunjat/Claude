@@ -10,8 +10,13 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Modules = ReplicatedStorage:WaitForChild("TyreCannon"):WaitForChild("Modules")
 local Config = require(Modules.Config)
 local Profile = require(script.Parent.Profile)
+local Analytics = require(script.Parent.Analytics)
 
 local PASSWORD = "dbug"
+-- the Roblox user ids let into the Debug menu (and its Playtest tab) without the password
+local DEVS: { [number]: boolean } = {
+	[3402448415] = true,   -- cjtrxn
+}
 
 local Debug = {}
 
@@ -125,6 +130,7 @@ function Debug.init(S)
 
 	COMMANDS.tutorial = function(_, p)
 		p.tutorial = false
+		p.tutStep = 0
 		return "tutorial will play again on rejoin"
 	end
 
@@ -138,6 +144,11 @@ function Debug.init(S)
 
 	COMMANDS.save = function(player)
 		return S.save(player.UserId) and "saved" or "save failed or disabled"
+	end
+
+	-- (a no-op: answers ok only to someone let in, so the client knows to open unlocked)
+	COMMANDS.whoami = function()
+		return "dev"
 	end
 
 	COMMANDS.profile = function(_, p)
@@ -288,13 +299,44 @@ function Debug.init(S)
 		return "got " .. t.name
 	end
 
+	-- the yard's looks (Game.YardLooks): the neon stage's pass on or off, a look straight on (its pass
+	-- or prestige given if it needs one), the prestige level
+	COMMANDS.midnightPass = function(_, p)
+		local v = v2(p)
+		v.passes.midnight = (not v.passes.midnight) or nil
+		if not v.passes.midnight and v.look and v.look.id == "midnight" then v.look = { id = "stage", way = v.look.way } end
+		return "neon stage pass " .. (v.passes.midnight and "on" or "off")
+	end
+
+	COMMANDS.setLook = function(_, p, id, way)
+		local v = v2(p)
+		local look = Game.YardLooksById[tostring(id)]
+		if not look then return "unknown look " .. tostring(id) end
+		if look.pass then v.passes[look.pass] = true end
+		if look.prestige and (p.prestige or 0) < look.prestige then p.prestige = look.prestige end
+		v.look = { id = look.id, way = Game.yardWay(tostring(way)).id }
+		return "look: " .. look.name .. (if look.ways then " (" .. v.look.way .. ")" else "")
+	end
+
+	COMMANDS.prestige = function(_, p, n)
+		p.prestige = math.clamp((p.prestige or 0) + math.floor(tonumber(n) or 1), 0, Game.Prestige.Max)
+		return "prestige " .. p.prestige
+	end
+
 	COMMANDS.wipeLoop = function(_, p)
 		p.v2 = LoopData.default()
 		p.credits = 0
 		return "loop progress wiped (stage 1, nothing bought)"
 	end
 
+	-- the playtest log (Analytics): every counter, session and note, for the Playtest tab
+	COMMANDS.playtest = function()
+		return Analytics.read()
+	end
+
 	R.Debug.OnServerInvoke = function(player: Player, cmd: any, a: any, b: any)
+		-- (devs listed in DEVS are let in without the password)
+		if DEVS[player.UserId] or game:GetService("RunService"):IsStudio() then authed[player.UserId] = true end
 		if cmd == "auth" then
 			if S.throttled(player, 1, "debugAuth") then return { ok = false, err = "Wait a second." } end
 			if a == PASSWORD then
@@ -310,7 +352,7 @@ function Debug.init(S)
 		if not p and cmd ~= "resetProfile" then return { ok = false, err = "No profile loaded." } end
 		local ok, res = pcall(fn, player, p, a, b)
 		if not ok then return { ok = false, err = tostring(res) } end
-		if cmd ~= "profile" then S.push(player) end
+		if cmd ~= "profile" and cmd ~= "playtest" and cmd ~= "whoami" then S.push(player) end
 		return { ok = true, msg = res, profile = S.profiles[player.UserId] }
 	end
 

@@ -4,6 +4,8 @@
 -- what they are doing, and a green SPECTATE tab under it while they are on a
 -- run. The old board bolted to the front of the plot meant walking over to read
 -- it; this one is readable and clickable from anywhere in the yard.
+-- v4: the yard's STYLE and its likes this week over the plate, and on anyone else's yard
+-- VISIT (walks you to its gate) and LIKE (once a day: a key for the owner).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -143,6 +145,12 @@ function PlotSigns.new(onSpectate)
 				if b.viewTab and o == b.viewTab and b.viewTab.Visible then
 					self:pressView(b)
 					return
+				elseif b.visitTab and o == b.visitTab and b.visitTab.Visible then
+					self:pressVisit(b)
+					return
+				elseif b.likeTab and o == b.likeTab and b.likeTab.Visible then
+					self:pressLike(b)
+					return
 				elseif b.tab and o == b.tab and b.tab.Visible then
 					self:pressSpectate(b)
 					return
@@ -157,6 +165,28 @@ function PlotSigns:pressView(node)
 	if os.clock() - (self.lastPress or 0) < 0.3 then return end
 	self.lastPress = os.clock()
 	if self.onView and node.info then self.onView(node.index, node.info) end
+end
+
+function PlotSigns:pressVisit(node)
+	if os.clock() - (self.lastPress or 0) < 0.3 then return end
+	self.lastPress = os.clock()
+	if self.onVisit then self.onVisit(node.anchor.Parent) end
+end
+
+function PlotSigns:pressLike(node)
+	if os.clock() - (self.lastPress or 0) < 0.3 then return end
+	self.lastPress = os.clock()
+	if self.onLike and node.userId then
+		task.spawn(function()
+			local ok = self.onLike(node.userId)
+			if ok then
+				self.liked = self.liked or {}
+				self.liked[node.userId] = true
+				Kit.pop(node.likeTab, 1.3, 0.3)
+				self:apply(self.last or {})
+			end
+		end)
+	end
 end
 
 function PlotSigns:pressSpectate(node)
@@ -309,16 +339,51 @@ function PlotSigns:buildBoard(anchor: BasePart)
 	view.root.Parent = gui
 	view.onClick = function() self:pressView(node) end
 	node.viewTab = view.root
-	gui.Size = UDim2.fromOffset(240, 136)
+	-- v4: the yard's style and likes, over the plate
+	local style = Kit.text("", 13, Kit.C.teal, 2)
+	style.Name = "Style"
+	style.AnchorPoint = Vector2.new(1, 0)
+	style.TextXAlignment = Enum.TextXAlignment.Right
+	style.Position = UDim2.new(1, -6, 0, 0)
+	style.Size = UDim2.fromOffset(150, 18)
+	style.Parent = gui
+	node.style = style
+	-- VISIT and LIKE on anyone else's yard
+	local visit = Kit.button("Visit", Kit.C.teal, UDim2.fromOffset(114, 30), 15)
+	visit.root.AnchorPoint = Vector2.new(0.5, 0)
+	visit.root.Position = UDim2.new(0.5, -59, 0, 138)
+	visit.root.Visible = false
+	visit.root.Parent = gui
+	visit.onClick = function() self:pressVisit(node) end
+	node.visitTab = visit.root
+	local like = Kit.button("Like", Kit.C.pink, UDim2.fromOffset(114, 30), 15)
+	like.root.AnchorPoint = Vector2.new(0.5, 0)
+	like.root.Position = UDim2.new(0.5, 59, 0, 138)
+	like.root.Visible = false
+	like.root.Parent = gui
+	like.onClick = function() self:pressLike(node) end
+	node.likeTab = like.root
+	node.likeBtn = like
+	gui.Size = UDim2.fromOffset(240, 172)
+	-- an empty plot's sign stays off, whoever turns the billboards back on (the intro and the launch
+	-- hide every billboard and put back what they hid)
+	gui:GetPropertyChangedSignal("Enabled"):Connect(function()
+		if node.vacant and gui.Enabled then gui.Enabled = false end
+	end)
 	return node
 end
 
 function PlotSigns:apply(snapshot)
 	snapshot = snapshot or {}
+	self.last = snapshot
 	for index, b in pairs(self.boards) do
 		local info = snapshot[index]
 		if info and info ~= false and type(info) == "table" then
 			local st = STATUS[info.status] or STATUS.base
+			if b.vacant then
+				b.vacant = false
+				b.gui.Enabled = self.visible ~= false
+			end
 			local sameOwner = b.userId == info.userId
 			b.info = info
 			if b.rig then
@@ -380,6 +445,20 @@ function PlotSigns:apply(snapshot)
 				end
 			end
 
+			-- v4: style and likes, VISIT and LIKE
+			local plot = b.anchor.Parent
+			local styleScore = plot and (plot:GetAttribute("V2_Style") :: number?) or 0
+			local likes = plot and (plot:GetAttribute("V2_Likes") :: number?) or 0
+			if b.style then b.style.Text = ("STYLE %d   LIKES %d"):format(styleScore or 0, likes or 0) end
+			local mine = info.userId == self.myUserId
+			if b.visitTab then b.visitTab.Visible = not mine end
+			if b.likeTab then
+				local done = self.liked ~= nil and self.liked[info.userId] == true
+				b.likeTab.Visible = not mine
+				b.likeBtn.setText(if done then "Liked" else "Like")
+				b.likeBtn.setEnabled(not done)
+			end
+
 			if b.userId ~= info.userId then
 				b.userId = info.userId
 				b.head.Image = ""
@@ -393,6 +472,9 @@ function PlotSigns:apply(snapshot)
 				end)
 			end
 		else
+			-- an empty plot's sign stays hidden (plots are claimed on joining)
+			b.vacant = true
+			b.gui.Enabled = false
 			b.info = nil
 			b.bestShown = nil
 			b.honkCount = nil
@@ -405,13 +487,16 @@ function PlotSigns:apply(snapshot)
 			b.placeholder.Visible = true
 			b.name.Text = "PLOT " .. index
 			b.name.TextColor3 = Color3.fromRGB(150, 156, 170)
-			b.sub.Text = "free yard · press E on the pad"
+			b.sub.Text = if game:GetService("UserInputService").KeyboardEnabled then "free yard · press E on the pad" else "free yard · tap Claim on the pad"
 			b.sub.Visible = true
 			if b.titleLine then UI.applyTitle(b.titleLine, nil) end
 			b.pill.Visible = false
 			b.pres.Visible = false
 			b.tab.Visible = false
 			if b.viewTab then b.viewTab.Visible = false end
+			if b.visitTab then b.visitTab.Visible = false end
+			if b.likeTab then b.likeTab.Visible = false end
+			if b.style then b.style.Text = "" end
 			if b.ring then b.ring.ImageColor3 = Color3.fromRGB(110, 116, 130) end
 		end
 	end
@@ -422,8 +507,9 @@ function PlotSigns:honked(_index: number, _count: number) end
 
 -- hidden while you are mid-run, so the sky is not full of other people's UI
 function PlotSigns:setVisible(v: boolean)
+	self.visible = v
 	for _, b in pairs(self.boards) do
-		b.gui.Enabled = v
+		b.gui.Enabled = v and not b.vacant
 	end
 end
 

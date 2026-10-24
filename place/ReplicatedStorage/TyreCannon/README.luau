@@ -52,4 +52,4 @@ RULES THE GAME KEEPS (from the owner's feedback)
 
 return {}
 
--- Scripts are edited in the Rojo project at Documents/TyreCannon (src/), not in Studio.
+-- Scripts are edited directly in Studio (through the Roblox Studio MCP). There is no Rojo project.

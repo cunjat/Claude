@@ -36,6 +36,11 @@ function PlotWheels:rebuild(plot: Instance, index: number, info)
 	local base = plot:GetAttribute("BaseCFrame")
 	if not holder or not base then return end
 	for _, c in ipairs(holder:GetChildren()) do c:Destroy() end
+	-- (2026-10-24, the owner) a yard nobody has holds no tyre: everyone's given a yard as they join
+	if not info.userId then
+		self.wheels[index] = nil
+		return nil
+	end
 	local wheel = WheelAssembly.build(holder, {
 		diameter = DIAMETER,
 		skin = info.skin or "stock",
@@ -124,7 +129,7 @@ function PlotWheels:apply(snapshot)
 				local ok, json = pcall(function() return HttpService:JSONEncode(info.stickers) end)
 				stickerKey = ok and json or ""
 			end
-			local key = table.concat({ info.skin or "stock", info.rim or "steel", info.generator or "field", info.rigSkin or "works", stickerKey }, "|")
+			local key = table.concat({ tostring(info.userId), info.skin or "stock", info.rim or "steel", info.generator or "field", info.rigSkin or "works", stickerKey }, "|")
 			if self.state[i] ~= key then
 				self.state[i] = key
 				self:rebuild(plot, i, info)

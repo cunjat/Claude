@@ -9,8 +9,10 @@
 
 local Players = game:GetService("Players")
 local MarketplaceService = game:GetService("MarketplaceService")
+local PolicyService = game:GetService("PolicyService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = require(ReplicatedStorage:WaitForChild("TyreCannon"):WaitForChild("Modules"):WaitForChild("Config"))
+local Analytics = require(script.Parent.Analytics)
 
 local Store = {}
 
@@ -39,6 +41,22 @@ function Store.init(S)
 	Players.PlayerAdded:Connect(function(pl) task.spawn(checkPasses, pl) end)
 	for _, pl in ipairs(Players:GetPlayers()) do task.spawn(checkPasses, pl) end
 
+	-- Paid random items (keys open crates) are banned in some countries. The shop only sells
+	-- key products when this attribute is false; a failed check counts as restricted.
+	local function checkPolicy(player: Player)
+		for attempt = 1, 3 do
+			local ok, info = pcall(function() return PolicyService:GetPolicyInfoForPlayerAsync(player) end)
+			if ok and type(info) == "table" then
+				player:SetAttribute("PaidRandomItemsRestricted", info.ArePaidRandomItemsRestricted == true)
+				return
+			end
+			task.wait(attempt * 2)
+		end
+		player:SetAttribute("PaidRandomItemsRestricted", true)
+	end
+	Players.PlayerAdded:Connect(function(pl) task.spawn(checkPolicy, pl) end)
+	for _, pl in ipairs(Players:GetPlayers()) do task.spawn(checkPolicy, pl) end
+
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(function(player: Player, passId: number, bought: boolean)
 		if not bought then return end
 		local pass = Config.StoreByPassId[passId]
@@ -54,8 +72,27 @@ function Store.init(S)
 	S.storeGrant = function(player: Player, p, productId: number): string?
 		local item = Config.StoreByProductId[productId]
 		if not item or not p.v2 then return nil end
+		if item.id == "starter" then
+			-- 15 keys and an Epic from a zone you've reached (once per player)
+			local Game = require(ReplicatedStorage:WaitForChild("TyreCannon"):WaitForChild("Modules"):WaitForChild("Game")) :: any
+			local v = p.v2
+			v.keys = math.min(1e6, v.keys + (item.keysPack or 15))
+			local pool = {}
+			for _, t in ipairs(Game.Tyres) do
+				if t.rarity == "Epic" and v.zones[t.zone] then table.insert(pool, t.id) end
+			end
+			if #pool == 0 then pool = { "cartwheel" } end
+			local id = pool[math.random(1, #pool)]
+			table.insert(v.inv, { uid = v.nextUid, id = id, forge = 0 })
+			v.nextUid += 1
+			v.index[id] = true
+			v.passes.starter = true
+			Analytics.earn(player, "Keys", item.keysPack or 15, v.keys, "IAP", item.id)
+			return ("+%d keys and a %s!"):format(item.keysPack or 15, Game.TyresById[id] and Game.TyresById[id].name or "tyre")
+		end
 		if item.keys then
 			p.v2.keys = math.min(1e6, p.v2.keys + item.keys)
+			Analytics.earn(player, "Keys", item.keys, p.v2.keys, "IAP", item.id)
 			return ("+%d keys"):format(item.keys)
 		end
 		if item.id == "serverluck" then

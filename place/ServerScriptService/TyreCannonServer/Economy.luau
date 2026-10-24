@@ -454,7 +454,10 @@ function Economy.init(S)
 	--==========================================================
 	-- daily streak, tutorial
 	--==========================================================
+	-- (retired 2026-10-12: the v1 daily. The calendar players see is Loop's Daily; with this one live
+	-- too, anyone firing the remote by hand got a second reward every day. Kept, switched off.)
 	R.ClaimDaily.OnServerInvoke = function(player: Player)
+		if true then return fail("That calendar is retired.") end
 		local p, e = guard(player, 0.5, "daily")
 		if not p then return e end
 		local claimable, index, streak = Progress.dailyState(p)
@@ -465,10 +468,32 @@ function Economy.init(S)
 		return done(player, { reward = reward, day = index, streak = streak })
 	end
 
-	R.TutorialDone.OnServerEvent:Connect(function(player: Player)
+	-- the tutorial's steps: saved (a player who leaves picks up where they were) and logged as the
+	-- onboarding funnel. Only the next step counts, so the funnel stays in order.
+	local Analytics = require(script.Parent.Analytics)
+	local GameMod = require(Modules.Game)
+	R.TutorialStep.OnServerEvent:Connect(function(player: Player, step: any)
+		local p = S.profiles[player.UserId]
+		if not p or p.tutorial or type(step) ~= "number" then return end
+		step = math.floor(step)
+		if step ~= (p.tutStep or 0) + 1 or step > #GameMod.TutorialSteps then return end
+		p.tutStep = step
+		Analytics.funnel(player, step)
+	end)
+
+	-- finished, or skipped from the start (a skip isn't a finish: it's logged on its own, not as the
+	-- funnel's last step)
+	R.TutorialDone.OnServerEvent:Connect(function(player: Player, how: any)
 		local p = S.profiles[player.UserId]
 		if not p or p.tutorial then return end
 		p.tutorial = true
+		if how == "skip" then
+			Analytics.custom(player, "TutorialSkipped", 1)
+		else
+			p.tutStep = #GameMod.TutorialSteps
+			Analytics.funnel(player, #GameMod.TutorialSteps)
+			if S.growth then S.growth(player, "tutorial") end
+		end
 		S.save(player.UserId)
 		S.push(player)
 	end)
@@ -557,6 +582,22 @@ function Economy.init(S)
 			end
 		end
 		return fail("That one's already open.")
+	end
+
+	-- Retired 2026-10-12: the v1 economy's remotes. Nothing in the current game calls them (the Garage,
+	-- the old Shop and Career panels are gone or unreachable), so each one only gave an exploiter a way in;
+	-- the v1 Prestige even resets p.credits, the cash the current game runs on. The handlers above are
+	-- kept as they were; this replaces what each remote does. To bring one back, take it off this list.
+	local RETIRED = {
+		"BuyUpgrade", "SelectTrack", "BuyItem", "EquipSkin", "SetLoadout", "EquipTrail", "EquipToolbox",
+		"BuyToken", "Prestige", "EquipCosmetic", "ClaimDaily", "BuyBooster", "SetPressure", "BuyTitle",
+		"EquipTitle", "Forge", "SetStickers", "OpenGift", "SendGift",
+	}
+	for _, name in ipairs(RETIRED) do
+		local rf = R:FindFirstChild(name)
+		if rf and rf:IsA("RemoteFunction") then
+			rf.OnServerInvoke = function() return { ok = false, err = "That's from an older version of the game." } end
+		end
 	end
 
 	-- timed boosters only burn while you're in the game

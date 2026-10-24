@@ -140,7 +140,14 @@ function YardLife:step(dt: number)
 				local n = self.t * 38
 				local amp = 0.025 + kick
 				local jig = CFrame.new(math.noise(n, 1.7) * amp, math.abs(math.noise(n, 4.2)) * amp, math.noise(n, 9.1) * amp)
-				model:PivotTo(m:GetPivot() * st.rel * jig)
+				-- (2026-10-24, the owner: it was "literally floating into the air linearly") jiggled about its
+				-- yard spot, which stays put: the container's own pivot followed the machine, so each frame's
+				-- upward jig was added to the last
+				local anchor = y.at and y.at[id]
+				if anchor then
+					st.spotRel = st.spotRel or anchor:ToObjectSpace(model:GetPivot())
+					model:PivotTo(anchor * st.spotRel * jig)
+				end
 			elseif id == "cannon" then
 				-- a thread of smoke out of the muzzle now and then
 				if now >= st.next then

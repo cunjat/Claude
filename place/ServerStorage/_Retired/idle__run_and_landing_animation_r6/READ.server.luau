@@ -1,0 +1,4 @@
+-- this is used for tje soup pals hangout gamem
+-- dont steal/copy
+-- thanks
+-- by auqhia

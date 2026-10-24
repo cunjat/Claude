@@ -136,9 +136,71 @@ local function lampLight(m: Model, parent: Instance, range: number, color: Color
 	local _ = parent
 end
 
+-- the yard editor's preview of a floor or fence before it's saved ({ floor, fence } by plot)
+PlotStage.previews = {} :: { [Instance]: { floor: string?, fence: string? } }
+
+-- the owner's chosen floor and fence (Game.YardFloors / YardFences): the preview while editing, else
+-- what the server published in the layout
+local function skinOf(plot: Instance): (string, string)
+	local pv = PlotStage.previews[plot]
+	local saved = Game.yardDecode(plot:GetAttribute("V2_Layout") :: string?)
+	return (pv and pv.floor) or saved.floor or "stage", (pv and pv.fence) or saved.fence or "stage"
+end
+
+-- shows a floor/fence on a plot without saving it (nil, nil goes back to the saved one)
+function PlotStage.preview(plot: Instance, floor: string?, fence: string?)
+	PlotStage.previews[plot] = if floor or fence then { floor = floor, fence = fence } else nil
+	local cur = (PlotStage :: any).current
+	if cur then cur:build(plot) end
+end
+
+-- (2026-10-24, the owner: the free yards still showed the white concrete and the old wooden posts and
+-- rails) the place streams: a yard's Floor, FloorTrim and old Fence parts are the server's, and each
+-- time one streams back in it comes back as the server has it. So the floor's look and the hidden old
+-- fence are put on again whenever a part of the plot arrives, not just once when the stage is built.
+function PlotStage:dress(plot: Instance)
+	local d = self.dressing[plot]
+	if not d then return end
+	local floor = plot:FindFirstChild("Floor")
+	if floor and floor:IsA("BasePart") then
+		floor.Material = d.floor.mat
+		floor.MaterialVariant = d.floor.variant or ""
+		floor.Color = d.floor.color
+		floor.Size = d.floorSize
+		floor.CFrame = d.floorCF
+	end
+	local trim = plot:FindFirstChild("FloorTrim")
+	if trim and trim:IsA("BasePart") then
+		-- (the place's own trim, as first seen, for when the yard is claimed)
+		if not self.trimOrig[plot] then self.trimOrig[plot] = { mat = trim.Material, color = trim.Color } end
+		local look = d.trim or self.trimOrig[plot]
+		trim.Size = d.trimSize
+		trim.CFrame = d.trimCF
+		trim.Material = look.mat
+		trim.MaterialVariant = ""
+		trim.Color = look.color
+	end
+	-- the old wooden posts and rails: gone (the stage's own fence stands in their place)
+	local oldFence = plot:FindFirstChild("Fence")
+	if oldFence then
+		for _, p in ipairs(oldFence:GetDescendants()) do
+			if p:IsA("BasePart") then
+				p.LocalTransparencyModifier = 1
+				p.Transparency = 1
+				-- (and out of the way: a grown yard reaches past where it stood)
+				p.CanCollide = false
+				p.CanQuery = false
+			end
+		end
+	end
+end
+
 function PlotStage.new()
 	local self = setmetatable({}, PlotStage)
+	;(PlotStage :: any).current = self
 	self.built = {} :: { [Instance]: string }
+	self.dressing = {} :: { [Instance]: any }
+	self.trimOrig = {} :: { [Instance]: any }
 	self.expecting = {} :: { [Instance]: boolean }
 	task.spawn(function()
 		local lobby = workspace:WaitForChild("Lobby", 30)
@@ -154,6 +216,19 @@ function PlotStage:watch(plot: Instance)
 	local function refresh() self:build(plot) end
 	plot:GetAttributeChangedSignal("V2_Tier"):Connect(refresh)
 	plot:GetAttributeChangedSignal("V2_Owner"):Connect(refresh)
+	plot:GetAttributeChangedSignal("V2_Layout"):Connect(refresh)
+	-- (a streamed-in floor or fence part takes the yard's look again; once a frame, however many arrive)
+	local queued = false
+	plot.DescendantAdded:Connect(function(d)
+		if queued or not d:IsA("BasePart") then return end
+		if d.Name == "Floor" or d.Name == "FloorTrim" or d.Name == "Post" or d.Name == "Rail" then
+			queued = true
+			task.defer(function()
+				queued = false
+				self:dress(plot)
+			end)
+		end
+	end)
 	task.spawn(function()
 		-- wait for the plot's frame and for the pieces to be in
 		while not plot:GetAttribute("BaseCFrame") do task.wait(0.5) end
@@ -303,7 +378,9 @@ function PlotStage:build(plot: Instance)
 	if not base then return end
 	local tier = (plot:GetAttribute("V2_Tier") :: number?) or 0
 	local owner = plot:GetAttribute("V2_Owner") :: string?
-	local key = tier .. "|" .. tostring(owner)
+	local skinFloor, skinFence = skinOf(plot)
+	if tier < 1 then skinFloor, skinFence = "stage", "stage" end
+	local key = tier .. "|" .. tostring(owner) .. "|" .. skinFloor .. "|" .. skinFence
 	if self.built[plot] == key then return end
 	self.built[plot] = key
 	-- a stage-up (StageUp asked for it): the old stage drops away first, then the new one rises
@@ -327,32 +404,42 @@ function PlotStage:build(plot: Instance)
 	-- builds every yard the same way)
 	local floor = plot:FindFirstChild("Floor") :: BasePart?
 	local g = GROUND[tier] or GROUND[0]
-	if floor then
-		floor.Material = g.mat
-		floor.MaterialVariant = g.variant or ""
-		floor.Color = g.color
-		floor.Size = Vector3.new(FLOOR.x1 - FLOOR.x0, 2, FLOOR.z1 - FLOOR.z0)
-		floor.CFrame = base * CFrame.new((FLOOR.x0 + FLOOR.x1) / 2, 1, (FLOOR.z0 + FLOOR.z1) / 2)
+	local chosen = Game.YardFloorsById[skinFloor]
+	if chosen and chosen.mat then
+		g = { mat = (Enum.Material :: any)[chosen.mat], variant = chosen.variant, color = chosen.color }
 	end
-	local trim = plot:FindFirstChild("FloorTrim") :: BasePart?
-	if trim then
-		trim.Size = Vector3.new(FLOOR.x1 - FLOOR.x0 + 4, 1.4, FLOOR.z1 - FLOOR.z0 + 4)
-		trim.CFrame = base * CFrame.new((FLOOR.x0 + FLOOR.x1) / 2, 0.5, (FLOOR.z0 + FLOOR.z1) / 2)
+	-- (2026-10-24, the owner) a yard nobody has is plain sand, so it reads as free at a glance
+	-- (2026-10-24, the owner, later: "change the base of said unclaimed plot to the sandstone we have in
+	-- game") the park's sandstone pavers, edged in its kerb stone
+	-- (and every yard, claimed or not, sits in the park's kerb stone rather than a grey concrete rim, so the
+	-- yards meet the lawn the way the walks do)
+	local trimLook = { mat = Enum.Material.Pavement, color = Color3.fromRGB(178, 152, 114) }
+	if tier < 1 or not owner then
+		g = { mat = Enum.Material.Pavement, color = Color3.fromRGB(214, 188, 146) }
 	end
-	local oldFence = plot:FindFirstChild("Fence")
-	if oldFence then
-		for _, d in ipairs(oldFence:GetDescendants()) do
-			if d:IsA("BasePart") then
-				d.LocalTransparencyModifier = 1
-				-- (and out of the way: a grown yard reaches past where it stood)
-				d.CanCollide = false
-			end
-		end
-	end
+	local _ = floor
+	self.dressing[plot] = {
+		floor = g, trim = trimLook,
+		floorSize = Vector3.new(FLOOR.x1 - FLOOR.x0, 2, FLOOR.z1 - FLOOR.z0),
+		floorCF = base * CFrame.new((FLOOR.x0 + FLOOR.x1) / 2, 1, (FLOOR.z0 + FLOOR.z1) / 2),
+		trimSize = Vector3.new(FLOOR.x1 - FLOOR.x0 + 4, 1.4, FLOOR.z1 - FLOOR.z0 + 4),
+		trimCF = base * CFrame.new((FLOOR.x0 + FLOOR.x1) / 2, 0.5, (FLOOR.z0 + FLOOR.z1) / 2),
+	}
+	self:dress(plot)
 
 	-- the fence: both sides, the back either side of the firing lane, the street side beside the gap
-	local fence = FENCE[tier] or FENCE[0]
+	local fence: string? = FENCE[tier] or FENCE[0]
+	local fenceChoice = Game.YardFencesById[skinFence]
+	if fenceChoice and fenceChoice.id == "none" then
+		fence = nil
+	elseif fenceChoice and fenceChoice.path then
+		fence = fenceChoice.path
+	end
+	-- (2026-10-24, the owner: "fix the fences") a free yard is fenced too, in plain chain-link, so the row of
+	-- yards stays neat; it had no fence at all, which left gaps in the row
+	if tier < 1 or not owner then fence = if Models.get("Lobby/ChainFence") then "Lobby/ChainFence" else FENCE[0] end
 	local function run(x0: number, z0: number, x1: number, z1: number)
+		if not fence then return end
 		local d = Vector3.new(x1 - x0, 0, z1 - z0)
 		local len = d.Magnitude
 		local n = math.max(1, math.ceil(len / PANEL - 0.05))
@@ -360,7 +447,7 @@ function PlotStage:build(plot: Instance)
 		for i = 0, n - 1 do
 			local t = (i + 0.5) / n
 			local at = Vector3.new(x0, FLOOR.y, z0) + d * t
-			place(fence, f, base * CFrame.new(at) * CFrame.Angles(0, yaw, 0))
+			place(fence :: string, f, base * CFrame.new(at) * CFrame.Angles(0, yaw, 0))
 		end
 	end
 	run(FLOOR.x0, FLOOR.z1, FLOOR.x1, FLOOR.z1)

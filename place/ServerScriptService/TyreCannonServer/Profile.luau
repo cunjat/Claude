@@ -57,6 +57,7 @@ function Profile.default()
 		daily = { day = 0, streak = 0 },
 		lifetime = { bestDistance = 0, credits = 0, robux = 0, bestSpectators = 0 },
 		tutorial = false,
+		tutStep = 0,
 		prefs = table.clone(Config.PrefDefaults),
 		gifts = {},					-- { uid, kind, id, from, fromId, at } waiting on the bench
 		nextGiftUid = 1,
@@ -66,6 +67,8 @@ function Profile.default()
 		ghosts = {},				-- [track id] = { d = recorded best run, s = gate split times }
 		guestbook = {},				-- { name, fromId, stamp, at } left by visitors, newest first
 		bay = { unlocked = false, skin = "stock", rim = "steel", trail = "none", stickers = {} },
+		receipts = {},				-- PurchaseIds of the last 50 Robux products granted, newest first
+		growth = { referredBy = 0, refPaid = false, group = false },	-- Server/Growth: who invited you, paid them, group reward
 		v2 = LoopData.default(),	-- the revamped loop (machines, keys, tyres)
 	}
 end
@@ -85,6 +88,9 @@ function Profile.cleanPref(key: string, v: any): (boolean, any)
 	elseif key == "rigName" then
 		if type(v) ~= "string" then return false, nil end
 		return true, v:sub(1, Config.RigName.MaxLength)
+	elseif key == "tips" then
+		if type(v) ~= "string" then return false, nil end
+		return true, (string.gsub(v, "[^%w_,]", "")):sub(1, 300)
 	elseif key == "uiScale" then
 		local x = tonumber(v)
 		if x == nil or x ~= x then return false, nil end
@@ -117,7 +123,8 @@ function Profile.sanitize(raw: any)
 	if type(raw) ~= "table" then return d end
 	local p = raw
 
-	d.credits = num(p.credits, 0, 1e12, d.credits)
+	-- (2026-10-24) the same cap as in a session (Loop: 1e15); 1e12 here cut a rich save to $1T on rejoin
+	d.credits = num(p.credits, 0, 1e15, d.credits)
 	if type(p.metals) == "table" then
 		for k in pairs(d.metals) do d.metals[k] = math.floor(num(p.metals[k], 0, 1e7, 0)) end
 	end
@@ -274,6 +281,7 @@ function Profile.sanitize(raw: any)
 		end
 	end
 	d.tutorial = p.tutorial == true
+	d.tutStep = math.clamp(math.floor(tonumber(p.tutStep) or 0), 0, 99)
 
 	if type(p.prefs) == "table" then
 		for k in pairs(Config.PrefDefaults) do
@@ -373,6 +381,16 @@ function Profile.sanitize(raw: any)
 			end
 		end
 	end
+	if type(p.receipts) == "table" then
+		for _, id in ipairs(p.receipts) do
+			if type(id) == "string" and #d.receipts < 50 then table.insert(d.receipts, id) end
+		end
+	end
+	if type(p.growth) == "table" then
+		d.growth.referredBy = math.floor(tonumber(p.growth.referredBy) or 0)
+		d.growth.refPaid = p.growth.refPaid == true
+		d.growth.group = p.growth.group == true
+	end
 	d.v2 = LoopData.sanitize(p.v2)
 	return d
 end
@@ -400,7 +418,7 @@ function Profile.load(store: DataStore?, userId: number)
 	local job = game.JobId
 	for attempt = 1, LOCK_WAITS + 3 do
 		local held, raw = false, nil
-		local ok = pcall(function()
+		local ok, err = pcall(function()
 			(store :: DataStore):UpdateAsync(tostring(userId), function(old)
 				local data, lock = unwrap(old)
 				local now = os.time()
@@ -413,6 +431,11 @@ function Profile.load(store: DataStore?, userId: number)
 			end)
 		end)
 		if ok and not held then return Profile.sanitize(raw), true end
+		-- Studio with API access off: that's permanent, so don't sit through the retries
+		-- (the pcall's message is "403: Cannot write to DataStore from studio if API access is not enabled.")
+		if not ok and (tostring(err):find("API access is not enabled", 1, true) or tostring(err):find("StudioAccessToApisNotAllowed", 1, true)) then
+			return Profile.default(), false
+		end
 		task.wait(held and 3 or attempt)
 	end
 	return Profile.default(), false

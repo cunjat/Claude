@@ -696,7 +696,12 @@ function Track:decorForChunk(ci: number)
 	end
 
 	local list = {}
-	local clusters = 4
+	-- (2026-10-16) how busy this stretch is: a slow seeded wave along the road, so there are quiet
+	-- open runs and busier patches, never the same four clumps a chunk everywhere
+	local s = (self.runSeed % 9973) * 0.137
+	local x0 = ci * CHUNK
+	local wave = 0.5 + 0.32 * math.sin(x0 / 2300 + s) + 0.18 * math.sin(x0 / 830 + s * 2.3)
+	local clusters = 2 + math.floor(math.clamp(wave, 0, 1) * 7 + rng:NextNumber())
 	for c = 1, clusters do
 		local cx = ci * CHUNK + rng:NextNumber(0, CHUNK)
 		local side = (c % 2 == 0) and 1 or -1
@@ -720,8 +725,67 @@ function Track:decorForChunk(ci: number)
 		end
 	end
 
+	-- a landmark now and then: a little place built on purpose beside the road (a village on the
+	-- Backroad, a truck stop on the Highway, a camel camp in the Thar), spaced 1.1-1.6 km apart by
+	-- the seed, each piece placed by hand-ish rules (round the middle, facing the road, nudged)
+	self:landmarksInto(list, ci, zcfg, half)
 	self._decor[ci] = list
 	return list
+end
+
+local LANDMARKS = {
+	backroad = {
+		{ "VillageHouse", 0, 0, 0.0 }, { "VillageHouse", -26, 10, 0.35 }, { "Kup", 22, -6, 0 }, { "Kup", 30, 8, 0 },
+		{ "TubeWell", -10, -18, 0.2 }, { "Buffalo", 8, -22, 1.2 }, { "Goat", 14, -26, 2.1 }, { "Goat", 18, -20, 0.6 },
+		{ "Tractor", -36, -10, 1.1 }, { "Bush", -18, 26, 0 }, { "Bush", 34, 24, 0 }, { "MustardPatch", 0, 36, 0 }, { "MustardPatch", 14, 40, 0 },
+		{ "Fence", -8, -30, 0 }, { "Fence", 9, -31, 0.05 }, { "Mailbox", -2, -34, 0 },
+	},
+	highway = {
+		{ "Dhaba", 0, 0, 0 }, { "GoodsTruck", -30, -8, 0.25 }, { "GoodsTruck", 30, -4, -0.15 }, { "StreetLamp", -12, -22, 0 },
+		{ "StreetLamp", 14, -22, 0 }, { "Billboard", 0, 30, 0 }, { "JerseyBarrier", -18, -30, 0 }, { "JerseyBarrier", 0, -32, 0.04 },
+		{ "JerseyBarrier", 18, -30, -0.03 }, { "HighwaySign", 44, -26, 0 },
+	},
+	dunes = {
+		{ "Chhatri", 0, 18, 0 }, { "Camel", -14, -8, 1.3 }, { "Camel", -4, -14, 1.5 }, { "Camel", 8, -10, 1.2 },
+		{ "Khejri", 26, 6, 0 }, { "Khejri", -30, 14, 0 }, { "Wreck", 34, -16, 0.6 }, { "CowSkull", 12, -24, 0 },
+		{ "Tumbleweed", -22, -22, 0 }, { "PricklyPear", 20, 22, 0 },
+	},
+}
+
+function Track:landmarksInto(list, ci: number, zcfg, half: number)
+	if not self.isRoad then return end
+	local pieces = LANDMARKS[zcfg.id]
+	if not pieces then return end
+	-- the landmarks' places along the road: every 1100-1600 m from the run's seed
+	local stM = Game.StudsToMetres
+	local x0, x1 = ci * CHUNK, (ci + 1) * CHUNK
+	local r = Random.new(self.runSeed * 811 + 17)
+	local m = r:NextNumber(500, 900)
+	local k = 0
+	while m / stM < x1 and k < 200 do
+		local x = m / stM
+		k += 1
+		if x >= x0 then
+			local lr = Random.new(self.runSeed * 6007 + k * 977)
+			local side = if lr:NextNumber() < 0.5 then -1 else 1
+			-- (far enough out that the pieces nearest the road stay off the steering corridor)
+			local z0 = side * (half + 40 + lr:NextNumber(0, half * 0.25))
+			local turn = lr:NextNumber(-0.3, 0.3)
+			for i, p in ipairs(pieces) do
+				-- (laid out facing the road: +z away from it; turned a touch as a whole, each piece nudged)
+				local dx, dz = p[2] + lr:NextNumber(-2.5, 2.5), (p[3] + lr:NextNumber(-2.5, 2.5)) * side
+				local cx = x + dx * math.cos(turn) - dz * math.sin(turn)
+				local cz = z0 + dx * math.sin(turn) + dz * math.cos(turn)
+				table.insert(list, {
+					key = ci .. ":lm" .. k .. "_" .. i, scenery = zcfg.id, pick = p[1],
+					x = cx, y = self:heightAt(cx), z = cz,
+					yaw = (if side > 0 then math.pi else 0) + p[4] + turn + lr:NextNumber(-0.12, 0.12),
+					scale = lr:NextNumber(0.92, 1.08), tint = lr:NextNumber(0.92, 1.05),
+				})
+			end
+		end
+		m += r:NextNumber(1100, 1600)
+	end
 end
 
 --==============================================================
@@ -843,7 +907,9 @@ function Track:keysForChunk(ci: number)
 		local half = Config.Physics.CorridorHalfWidth
 		for i, m in ipairs(Game.keySpots()) do
 			local x = m / Game.StudsToMetres
-			if x >= ci * CHUNK and x < (ci + 1) * CHUNK then
+			-- (keyAllow: the run's keys from the server's Begin; nil shows them all, as the load scene does)
+			local allowed = self.keyAllow == nil or table.find(self.keyAllow, i) ~= nil
+			if allowed and x >= ci * CHUNK and x < (ci + 1) * CHUNK then
 				local rng = Random.new((self.runSeed % 65536) * 31337 + i * 2654435761 + 23)
 				rng:NextNumber()
 				local _ = half

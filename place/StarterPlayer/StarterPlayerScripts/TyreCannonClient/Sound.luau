@@ -20,6 +20,12 @@ Sound.Bank = {
 	gateWhoosh = { id = "rbxassetid://9114346802", volume = 0.6, group = "Effects" },	-- enhanced vehicle pass by, fast whoosh
 	land = { id = "rbxassetid://9114036511", volume = 0.5, group = "Effects" },			-- deep impacts, low end
 	cheer = { id = "rbxassetid://9120973900", volume = 0.4, group = "Effects" },			-- crowd, short punchy cheers
+	medal = { id = "rbxassetid://9113849492", volume = 0.6, group = "Effects" },			-- coins or keys jingle, metallic clinks
+	-- (2026-10-23) the cannon going off: a short deep punch with a long booming tail under it
+	launchPunch = { id = "rbxassetid://9114036511", volume = 0.85, group = "Effects" },	-- deep impacts 7
+	launchBoom = { id = "rbxassetid://9125402735", volume = 0.5, group = "Effects" },	-- boom impact, deep distant, long resonant decay
+	-- APM Music
+	lobby = { id = "rbxassetid://1837050956", volume = 0.2, group = "Music", looped = true },	-- "Bouncing", 2:33
 }
 
 local bed: Sound? = nil
@@ -79,6 +85,32 @@ function Sound.stopBed(fade: number?)
 	local t = TweenService:Create(s, TweenInfo.new(fade or 0.8), { Volume = 0 })
 	t:Play()
 	t.Completed:Once(function() s:Destroy() end)
+end
+
+-- (2026-10-23) the hub's music: "Bouncing" while you're in the yard, paused (not restarted) during a run,
+-- so coming back picks up where it left off; it waits for the loading intro to finish
+local hubSong: Sound? = nil
+local hubOn = false
+function Sound.hubMusic(on: boolean)
+	hubOn = on
+	task.spawn(function()
+		local pg = game:GetService("Players").LocalPlayer:FindFirstChildOfClass("PlayerGui")
+		while pg and pg:GetAttribute("IntroPlaying") do task.wait(0.25) end
+		if hubOn ~= on then return end
+		local def = Sound.Bank.lobby
+		if not hubSong then
+			hubSong = make(def, 0)
+		end
+		local s = hubSong :: Sound
+		if on then
+			if not s.IsPlaying then if s.TimePosition > 0 then s:Resume() else s:Play() end end
+			TweenService:Create(s, TweenInfo.new(2.5), { Volume = def.volume }):Play()
+		else
+			local t = TweenService:Create(s, TweenInfo.new(0.8), { Volume = 0 })
+			t:Play()
+			t.Completed:Once(function() if not hubOn then s:Pause() end end)
+		end
+	end)
 end
 
 -- how fast the bed plays: slow motion drags the music down with it

@@ -14,6 +14,7 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Game = require(ReplicatedStorage:WaitForChild("TyreCannon"):WaitForChild("Modules"):WaitForChild("Game"))
+local Analytics = require(script.Parent.Analytics)
 
 local Heats = {}
 
@@ -39,6 +40,8 @@ function Heats.init(S)
 	}
 	-- in Studio a heat runs with one player, so it can be tried alone
 	local minPlayers = RunService:IsStudio() and 1 or H.MinPlayers
+	-- (the client hides the Heat notice when the server hasn't this many players)
+	workspace:SetAttribute("HeatMin", minPlayers)
 
 	local phase = "idle"
 	local joined: { [number]: boolean } = {}
@@ -98,11 +101,16 @@ function Heats.init(S)
 			local pl = Players:GetPlayerByUserId(e.uid)
 			local p = S.profiles[e.uid]
 			local bonus, keys = 0, 0
+			if pl and S.growth then S.growth(pl, "heat", { place = i }) end
 			if pl and p and p.v2 and i <= #H.Pay then
 				bonus = math.floor(e.r.cash * H.Pay[i])
-				keys = H.TopKeys
+				-- (2026-10-24) a key only for beating someone: in a two- or three-player server every
+				-- racer was on the podium, about 24 keys an hour each
+				keys = if i < #list then H.TopKeys else 0
 				p.credits += bonus
 				p.v2.keys = math.min(1e6, p.v2.keys + keys)
+				Analytics.earn(pl, "Cash", bonus, p.credits, "Gameplay", "Heat")
+				Analytics.earn(pl, "Keys", keys, p.v2.keys, "Gameplay", "Heat")
 				S.push(pl)
 			end
 			table.insert(placings, { userId = e.uid, name = e.r.name, metres = math.floor(e.r.metres), place = i, bonus = bonus, keys = keys })

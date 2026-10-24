@@ -22,7 +22,8 @@ export type State = {
 	grounded: boolean, bank: number,
 	-- the tuck (RunPhysics.tuck): held, for how long, cooling, and whether the key was down last step
 	tucking: boolean?, tuckT: number?, tuckCd: number?, tuckPrev: boolean?,
-	tuckAmt: number?, tuckBuf: number?, perfectT: number?, perfectUsed: boolean?,
+	tuckAmt: number?, tuckBuf: number?, perfectT: number?,
+	bumpX: number?,       -- where the last speed bump was (one lip only counts once)
 }
 
 export type Input = {
@@ -45,7 +46,7 @@ export type Ctx = {
 
 export type Landing = { impact: number, soft: boolean, bounced: boolean, tp: number, braced: boolean }
 
-export type Result = { tookOff: boolean, landing: Landing? }
+export type Result = { tookOff: boolean, landing: Landing?, bump: boolean?, bumpTucked: boolean? }
 
 export type Terrain = { heightAt: (number) -> number, slopeAt: (number) -> number }
 
@@ -76,13 +77,11 @@ function RunPhysics.tuck(st: State, pressed: boolean, T: Terrain, F: any, dt: nu
 	local edge = pressed and not st.tuckPrev
 	st.tuckPrev = pressed
 	st.tuckCd = math.max(0, (st.tuckCd or 0) - dt)
-	-- the perfect test, with its grace. One PERFECT a drop: once taken, the chance stays shut until
-	-- the road has stopped dropping away (and the grace has run out)
+	-- the perfect test, with its grace
 	if RunPhysics.perfectAhead(st, T, F) then
-		if not st.perfectUsed then st.perfectT = F.PerfectGrace or 0.18 end
+		st.perfectT = F.PerfectGrace or 0.18
 	else
 		st.perfectT = math.max(0, (st.perfectT or 0) - dt)
-		if st.perfectT <= 0 then st.perfectUsed = false end
 	end
 	-- a press during the cooldown is held for a moment
 	if edge then st.tuckBuf = F.TuckBuffer or 0.2 end
@@ -94,13 +93,14 @@ function RunPhysics.tuck(st: State, pressed: boolean, T: Terrain, F: any, dt: nu
 		if (st.perfectT or 0) > 0 then
 			ev = "perfect"
 			st.perfectT = 0
-			st.perfectUsed = true
 		end
 	end
 	if st.tucking then
 		if not pressed then
 			st.tucking = false
-			st.tuckCd = F.TuckEarly
+			-- (2026-10-24) letting go late costs about what a cramp does: re-tapping just before the cramp
+			-- kept the tuck on 88% of the time, so spamming it was the best play. A short tap is still cheap.
+			st.tuckCd = math.max(F.TuckEarly, F.TuckCool * (st.tuckT or 0) / F.TuckWindow)
 		else
 			st.tuckT = (st.tuckT or 0) + dt
 			if st.tuckT >= F.TuckWindow then
@@ -115,6 +115,15 @@ function RunPhysics.tuck(st: State, pressed: boolean, T: Terrain, F: any, dt: nu
 	local rate = if want > (st.tuckAmt or 0) then 9 else 6
 	st.tuckAmt = (st.tuckAmt or 0) + (want - (st.tuckAmt or 0)) * math.min(1, dt * rate)
 	return st.tucking == true, ev
+end
+
+-- the slope under a rolling tyre, read from behind it. Terrain.slopeAt looks either side of x, so
+-- across a kicker's lip (the ground drops away in a step) it reads the last few studs of the ramp
+-- as a cliff: the tyre was pointed 50-70 degrees into the ground and dived off the lip, losing most
+-- of its speed. Read from behind, the ramp is the ramp right up to the lip, and it flies off it.
+local GROUND_LOOK = 6
+local function groundSlope(T: Terrain, x: number): number
+	return (T.heightAt(x) - T.heightAt(x - GROUND_LOOK)) / GROUND_LOOK
 end
 
 function RunPhysics.step(st: State, inp: Input, c: Ctx, T: Terrain, F: any, dt: number): Result
@@ -135,7 +144,7 @@ function RunPhysics.step(st: State, inp: Input, c: Ctx, T: Terrain, F: any, dt: 
 
 	local py = st.y
 	if st.grounded then
-		local tp0 = math.atan(T.slopeAt(st.x))
+		local tp0 = math.atan(groundSlope(T, st.x))
 		local fric = (F.GroundFriction0 + s * F.GroundFriction1) * c.friction * c.fatigue * (1 + (F.TuckRoll - 1) * tk)
 		local sn = math.sin(tp0)
 		-- the arcade rule the hills run on: down a slope gravity pulls harder than it holds back up one
@@ -148,14 +157,25 @@ function RunPhysics.step(st: State, inp: Input, c: Ctx, T: Terrain, F: any, dt: 
 		local vy0 = s * math.sin(tp0)
 		local yBall = py + vy0 * dt - 0.5 * g * dt * dt
 		if s > F.TakeoffMin and gNew < yBall - 0.35 then
-			-- the ground fell away faster than the tyre drops: off the lip
+			-- the ground fell away faster than the tyre drops: off the lip. A ledge (a speed bump's
+			-- lip) is a skill check: tucked, you keep your speed; untucked, it costs F.BumpLoss
+			-- (a hop off a lip can come down and leave again just past it: that's the same bump)
+			if yBall - gNew > (F.BumpDrop or 4) and st.x - (st.bumpX or -math.huge) > 60 then
+				st.bumpX = st.x
+				res.bump = true
+				res.bumpTucked = tk >= 0.5
+				if not res.bumpTucked then
+					s *= 1 - (F.BumpLoss or 0)
+					st.speed = s
+				end
+			end
 			st.grounded = false
 			st.pitch = tp0
 			st.y = yBall
 			res.tookOff = true
 		else
 			st.y = gNew
-			st.pitch = math.atan(T.slopeAt(st.x))
+			st.pitch = math.atan(groundSlope(T, st.x))
 		end
 		st.speed = s
 		return res

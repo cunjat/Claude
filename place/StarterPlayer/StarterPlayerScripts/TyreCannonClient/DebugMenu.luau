@@ -6,6 +6,8 @@
 --   Run      launch, the bots (none / ok / good), speed and nitro, end the run
 --   Game     the stats overlay, popups, animations, hide the UI
 --   Log      every client and server error and warning, newest first
+--   Playtest the playtest log (Server/Analytics): today and the last week, the tutorial funnel,
+--            what got opened and done, who played how long, and the feedback notes
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -17,6 +19,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Root = ReplicatedStorage:WaitForChild("TyreCannon")
 local Remotes = Root:WaitForChild("Remotes")
 local Config = require(Root:WaitForChild("Modules"):WaitForChild("Config"))
+local Game = require(Root:WaitForChild("Modules"):WaitForChild("Game"))
 local UI = require(script.Parent.UI)
 local Kit = require(script.Parent.Kit)
 local C = Kit.C
@@ -25,13 +28,29 @@ local DebugMenu = {}
 DebugMenu.__index = DebugMenu
 
 local MAX_LOG = 120
-local TABS = { "Player", "Run", "Game", "Log" }
+local TABS = { "Player", "Run", "Game", "Log", "Playtest" }
 
 function DebugMenu.new(gui: ScreenGui, ctx)
 	local self = setmetatable({}, DebugMenu)
 	self.ctx = ctx
 	self.gui = gui
-	self.unlocked = false
+	-- (in Studio it's always a dev at the keys: the menu opens unlocked, and the server agrees)
+	self.unlocked = RunService:IsStudio()
+	-- (a dev on the server's DEVS list is let in without the password: ask once)
+	task.spawn(function()
+		-- (a few tries: the server answers only once the save's loaded)
+		for _ = 1, 6 do
+			local ok, res = pcall(function() return Remotes.Debug:InvokeServer("whoami") end)
+			if ok and type(res) == "table" and res.ok then
+				self.unlocked = true
+				if self.panel.Visible then self:render() end
+				return
+			elseif ok and type(res) == "table" and res.err == "Locked." then
+				return
+			end
+			task.wait(5)
+		end
+	end)
 	self.log = {}
 	self.errors = 0
 	self.tab = "Player"
@@ -101,8 +120,8 @@ function DebugMenu.new(gui: ScreenGui, ctx)
 	self.body = body
 	self.tabButtons = {}
 	for i, name in ipairs(TABS) do
-		local b = Kit.tab(name, UDim2.fromOffset(138, 40), name == self.tab)
-		b.root.Position = UDim2.fromOffset((i - 1) * 150, 0)
+		local b = Kit.tab(name, UDim2.fromOffset(110, 40), name == self.tab)
+		b.root.Position = UDim2.fromOffset((i - 1) * 119, 0)
 		b.root.ZIndex = 8
 		b.root.Parent = body
 		b.onClick = function()
@@ -199,6 +218,117 @@ function DebugMenu:server(cmd: string, a: any?, b: any?)
 	return res
 end
 
+-- the Playtest tab: asks the server for the log, then lays it out as lines of text
+function DebugMenu:renderPlaytest(c: ScrollingFrame)
+	UI.mk("UIListLayout", { Padding = UDim.new(0, 4), SortOrder = Enum.SortOrder.LayoutOrder, Parent = c })
+	local order = 0
+	local function line(text: string, color: Color3?, size: number?)
+		order += 1
+		local l = Kit.text(text, size or 14, color or C.text, 1.5, Kit.Body)
+		l.RichText = true
+		l.Size = UDim2.new(1, -16, 0, 0)
+		l.AutomaticSize = Enum.AutomaticSize.Y
+		l.TextWrapped = true
+		l.TextXAlignment = Enum.TextXAlignment.Left
+		l.LayoutOrder = order
+		l.ZIndex = 8
+		l.Parent = c
+		return l
+	end
+	local function head(text: string)
+		local l = line(string.upper(text), C.gold, 16)
+		l.FontFace = Kit.Font
+	end
+	local refresh = Kit.button("Refresh", C.blue, UDim2.fromOffset(140, 34), 15)
+	refresh.root.ZIndex = 8
+	refresh.root.LayoutOrder = 0
+	refresh.root.Parent = c
+	refresh.onClick = function() self:render() end
+	local status = line("Loading the playtest log...", C.muted)
+	task.spawn(function()
+		local res = self:server("playtest")
+		if not (res and res.ok and type(res.msg) == "table") then
+			status.Text = "Couldn't load the log."
+			return
+		end
+		if self.tab ~= "Playtest" or not status.Parent then return end
+		local d = res.msg
+		status.Text = if d.saved then "Saved across every server (written once a minute)." else "This server only (the store can't be reached here, e.g. in Studio)."
+		local function n(t, k) return tonumber(t[k]) or 0 end
+		-- (players' own words go into rich text: keep their < > & from being read as markup)
+		local function esc(s: any): string
+			return (string.gsub(string.gsub(string.gsub(tostring(s), "&", "&amp;"), "<", "&lt;"), ">", "&gt;"))
+		end
+		local function pct(a: number, b: number): string
+			return if b > 0 then ("%d%%"):format(math.floor(a / b * 100 + 0.5)) else "-"
+		end
+		local today = (d.days[1] and d.days[1].c) or {}
+		local runs = n(today, "ev:RunMetres")
+		head("Today")
+		line(("Players <b>%d</b> (new %d)   Sessions %d, avg <b>%.1f min</b>   Runs <b>%d</b>, avg %s"):format(
+			n(today, "joins"), n(today, "newPlayers"), n(today, "sessions"), n(today, "minutes") / math.max(1, n(today, "sessions")),
+			runs, if runs > 0 then Game.metres(n(today, "metres") / runs) else "-"))
+		line(("Crates opened %d   Jobs done %d"):format(n(today, "ev:CratesOpened"), n(today, "ev:QuestDone")))
+		line(("Stage ups %d   Prestiges %d   Trials %d   Level ups %d   Titles %d   Perks %d   Likes %d   Tutorial skips %d"):format(
+			n(today, "ev:StageUp"), n(today, "ev:Prestige"), n(today, "ev:TrialDone"), n(today, "ev:LevelUp"), n(today, "ev:TitleUnlocked"),
+			n(today, "ev:PerkPicked"), n(today, "ev:YardLike"), n(today, "ev:TutorialSkipped")))
+		line(("Feedback %d   Ratings %d, avg <b>%s</b> stars"):format(n(today, "ev:Feedback"), n(today, "rated"),
+			if n(today, "rated") > 0 then ("%.1f"):format(n(today, "stars") / n(today, "rated")) else "-"))
+		head("Tutorial funnel (today, of new players)")
+		local base = math.max(n(today, "newPlayers"), n(today, "tut:Joined"))
+		for _, step in ipairs(d.steps or {}) do
+			local k = n(today, "tut:" .. step)
+			line(("%-14s %4d   %s"):format(step, k, pct(k, base)), if base > 0 and k / base < 0.5 then C.red else C.text)
+		end
+		local function group(title: string, prefix: string)
+			local rows = {}
+			for k, v in pairs(today) do
+				if string.sub(k, 1, #prefix) == prefix then table.insert(rows, { k = string.sub(k, #prefix + 1), v = tonumber(v) or 0 }) end
+			end
+			if #rows == 0 then return end
+			table.sort(rows, function(a, b) return a.v > b.v end)
+			head(title)
+			local parts = {}
+			for _, r in ipairs(rows) do table.insert(parts, ("%s %s"):format(r.k, Game.short(r.v))) end
+			line(table.concat(parts, "   "))
+		end
+		group("Screens opened", "open:")
+		group("Tips seen", "tip:")
+		group("Cash and keys in", "in:")
+		group("Cash and keys out", "out:")
+		if #d.days > 1 then
+			head("The last week")
+			for _, day in ipairs(d.days) do
+				local t = day.c
+				local s = n(t, "sessions")
+				line(("%s   players %d (new %d)   avg %.1f min   runs %d   ratings %s"):format(
+					os.date("!%a %d %b", day.day * 86400), n(t, "joins"), n(t, "newPlayers"), n(t, "minutes") / math.max(1, s), n(t, "ev:RunMetres"),
+					if n(t, "rated") > 0 then ("%.1f"):format(n(t, "stars") / n(t, "rated")) else "-"))
+			end
+		end
+		local function who(r): string
+			return ("<b>%s</b>  %.1f min  runs %s  best %s  stage %s  P%s  lv %s  tutorial %s%s"):format(
+				esc(r.n), tonumber(r.m) or 0, tostring(r.runs or "-"), if r.best then Game.metres(r.best) else "-",
+				tostring(r.stage or "-"), tostring(r.pres or 0), tostring(r.lvl or "-"),
+				tostring(d.steps and d.steps[tonumber(r.tut) or 0] or r.tut or "-"), if r.tutDone then " (done)" else "")
+		end
+		head(("Playing now (%d)"):format(#(d.now or {})))
+		for _, r in ipairs(d.now or {}) do line(who(r)) end
+		head("Recent sessions")
+		for i, r in ipairs(d.sessions or {}) do
+			if i > 30 then break end
+			line(os.date("!%d %b %H:%M  ", tonumber(r.t) or 0) .. who(r), C.text, 13)
+		end
+		head("Feedback notes")
+		for i, e in ipairs(d.notes or {}) do
+			if i > 30 then break end
+			local stars = if (tonumber(e.rating) or 0) > 0 then string.rep("*", e.rating) .. "  " else ""
+			line(("<b>%s</b> [%s] %s%s  <font color=\"#8A8478\">stage %s, %s runs, %s</font>"):format(
+				esc(e.name), esc(string.upper(tostring(e.kind))), stars, esc(e.text or ""), tostring(e.tier), tostring(e.runs), tostring(e.ver)), C.text, 13)
+		end
+	end)
+end
+
 function DebugMenu:render()
 	self.lock.Visible = not self.unlocked
 	self.body.Visible = self.unlocked
@@ -210,6 +340,11 @@ function DebugMenu:render()
 		if not ch:IsA("UIPadding") then ch:Destroy() end
 	end
 	local ctx = self.ctx
+
+	if self.tab == "Playtest" then
+		self:renderPlaytest(c)
+		return
+	end
 
 	if self.tab == "Log" then
 		UI.mk("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = c })
@@ -282,6 +417,22 @@ function DebugMenu:render()
 			add(id .. " +1", function() self:server("machine", id, 1) end)
 			add(id .. " -1", function() self:server("machine", id, -1) end)
 		end
+		gap()
+		-- the yard's looks: the neon stage (Midnight Garage pass) and the Hall of Prestige
+		add("Neon pass on/off", function() self:server("midnightPass") end, C.purple)
+		add("Look: stage", function() self:server("setLook", "stage") end)
+		add("Look: prestige", function() self:server("setLook", "prestige") end, C.gold)
+		for _, w in ipairs({ "Midnight", "Sunset", "Toxic" }) do
+			add("Neon: " .. w, function() self:server("setLook", "midnight", w) end, C.purple)
+		end
+		add("Prestige +1", function() self:server("prestige", 1) end, C.gold)
+		add("Prestige -1", function() self:server("prestige", -1) end)
+		add("Open shop", function()
+			self:toggle(false)
+			workspace:SetAttribute("DebugPanel", "")
+			task.wait()
+			workspace:SetAttribute("DebugPanel", "shop")
+		end, C.green)
 		gap()
 		add("All zones", function() self:server("allZones") end, C.teal)
 		add("One of every tyre", function() self:server("allTyres") end, C.purple)

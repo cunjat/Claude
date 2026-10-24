@@ -2,7 +2,7 @@
 -- TYRE CANNON :: Preload
 -- Loads everything the game can show before the loading screen lifts, one stage at a time, so the
 -- bar moves per thing being readied rather than per file:
---   the yard, the workshop, the garage, the road, the tyres, the sounds, the interface, warm-up
+--   the yard, the road, the tyres, the sounds, the interface, warm-up
 -- The last stage draws every model and fires every effect once, off-camera and behind the loading
 -- screen, so nothing hitches the first time it's actually seen.
 --   Preload.run(gui, report)   blocks until done; report(stageIndex, stageName, kInsideStage)
@@ -14,14 +14,19 @@ local RunService = game:GetService("RunService")
 
 local Preload = {}
 
+-- what the loading screen waits for: all of it. The interface (every screen's art, the crate
+-- pictures among it), the tyres (every tyre's picture and model), the yard you spawn in, the road
+-- and everything on it, every sound, and then a warm-up that draws every model once, so nothing in
+-- the game is fetched or built the first time it's seen. The loading scene plays over all of it,
+-- so the wait is spent watching the game.
 Preload.Stages = {
-	"THE YARD", "THE ROAD", "THE TYRES", "THE SOUNDS", "THE INTERFACE", "WARMING UP",
+	"THE INTERFACE", "THE TYRES", "THE YARD", "THE ROAD", "THE SOUNDS", "WARMING UP",
 }
 
 -- sound ids that only ever appear in code
 local CODE_SOUNDS = {
-	"rbxassetid://122316613819334", "rbxassetid://9112854440", "rbxassetid://9125402735", "rbxassetid://9118823101",
-	"rbxassetid://5540424854", "rbxassetid://9114065998", "rbxassetid://9120386436",
+	"rbxassetid://122316613819334", "rbxassetid://71949512559141", "rbxassetid://9125402735", "rbxassetid://9114036511",
+	"rbxassetid://5540424854", "rbxassetid://9114065998", "rbxassetid://9120386436", "rbxassetid://9112854440", "rbxassetid://9118823101",
 }
 -- images that only ever appear in code (pack effect sheets)
 local CODE_IMAGES = {
@@ -34,7 +39,7 @@ local CONTENT = {
 	"SurfaceAppearance", "Animation", "Sky", "PartOperation", "ImageLabel", "ImageButton",
 }
 
-local STAGE_CAP = 15 -- seconds; a stage that can't finish in this long moves on rather than hanging
+local STAGE_CAP = 30 -- seconds; a stage that can't finish in this long moves on rather than hanging
 
 local function contentOf(folder: Instance?, into: { any })
 	if not folder then return end
@@ -52,28 +57,30 @@ local function child(parent: Instance?, name: string): Instance?
 	return parent and parent:FindFirstChild(name) or nil
 end
 
--- preload a list in small batches, reporting how far through it is
-local function load(list: { any }, onK: (number) -> ())
+-- preload a list in small batches, reporting how far through it is (and how many of how many)
+local function load(list: { any }, onK: (number, number, number) -> ())
 	local total = #list
 	if total == 0 then
-		onK(1)
+		onK(1, 0, 0)
 		return
 	end
 	local started = os.clock()
-	local BATCH = 16
+	local BATCH = 12
 	for i = 1, total, BATCH do
 		local last = math.min(i + BATCH - 1, total)
 		pcall(function() ContentProvider:PreloadAsync(table.move(list, i, last, 1, {})) end)
-		onK(last / total)
+		onK(last / total, last, total)
 		if os.clock() - started > STAGE_CAP then break end
 	end
-	onK(1)
+	onK(1, total, total)
 end
 
--- every model drawn once in front of the camera (the loading screen covers it), a few at a time
-local function warmUp(assets: Instance?, onK: (number) -> ())
+-- every model drawn once (meshes and textures sent to the graphics card), a few at a time. They're
+-- drawn in a small, all-but-invisible window in the corner (a ViewportFrame): the loading scene
+-- shows the real world, and anything put in front of its camera would be seen.
+local function warmUp(assets: Instance?, onK: (number, number, number) -> ())
 	if not assets then
-		onK(1)
+		onK(1, 0, 0)
 		return
 	end
 	local sources = {}
@@ -92,14 +99,31 @@ local function warmUp(assets: Instance?, onK: (number) -> ())
 	end
 	local total = #sources
 	if total == 0 then
-		onK(1)
+		onK(1, 0, 0)
 		return
 	end
-	local holder = Instance.new("Folder")
-	holder.Name = "_WarmUp"
-	holder.Parent = workspace
-	local cam = workspace.CurrentCamera
-	local BATCH = 12
+	local pg = game:GetService("Players").LocalPlayer:FindFirstChildOfClass("PlayerGui")
+	local sg = Instance.new("ScreenGui")
+	sg.Name = "_WarmUp"
+	sg.IgnoreGuiInset = true
+	sg.DisplayOrder = 5990
+	sg.ResetOnSpawn = false
+	local vp = Instance.new("ViewportFrame")
+	vp.AnchorPoint = Vector2.new(1, 1)
+	vp.Position = UDim2.fromScale(1, 1)
+	vp.Size = UDim2.fromOffset(96, 96)
+	vp.BackgroundTransparency = 1
+	vp.ImageTransparency = 0.985
+	vp.Parent = sg
+	local world = Instance.new("WorldModel")
+	world.Parent = vp
+	local cam = Instance.new("Camera")
+	cam.FieldOfView = 70
+	cam.CFrame = CFrame.lookAt(Vector3.new(0, 40, 160), Vector3.new(0, 0, 0))
+	cam.Parent = vp
+	vp.CurrentCamera = cam
+	sg.Parent = pg
+	local BATCH = 10
 	local started = os.clock()
 	for i = 1, total, BATCH do
 		local batch = {}
@@ -107,47 +131,38 @@ local function warmUp(assets: Instance?, onK: (number) -> ())
 			local ok, copy = pcall(function() return sources[j]:Clone() end)
 			if ok and copy then
 				for _, d in ipairs(copy:GetDescendants()) do
-					if d:IsA("LuaSourceContainer") then
+					if d:IsA("LuaSourceContainer") or d:IsA("Sound") or d:IsA("Light") then
 						d:Destroy()
 					elseif d:IsA("BasePart") then
 						d.Anchored = true
 						d.CanCollide = false
 						d.CanQuery = false
 						d.CanTouch = false
-					elseif d:IsA("Sound") then
-						d.Playing = false
-						d.Volume = 0
 					end
 				end
 				if copy:IsA("BasePart") then
 					copy.Anchored = true
 					copy.CanCollide = false
 				end
-				-- a row in front of the lens, far enough to be in view and drawn
+				-- a row across the little window's view
 				local k = j - i
-				local where = cam.CFrame * CFrame.new((k - BATCH / 2) * 14, 0, -90)
-				pcall(function() (copy :: any):PivotTo(where) end)
-				copy.Parent = holder
-				for _, d in ipairs(copy:GetDescendants()) do
-					if d:IsA("ParticleEmitter") then
-						d.Enabled = false
-						pcall(function() d:Emit(2) end)
-					end
-				end
+				pcall(function() (copy :: any):PivotTo(CFrame.new((k - BATCH / 2) * 24, 0, 0)) end)
+				copy.Parent = world
 				table.insert(batch, copy)
 			end
 		end
-		-- let them render a few frames, then clear the row
+		-- let them draw a few frames, then clear the row
 		for _ = 1, 3 do RunService.RenderStepped:Wait() end
 		for _, c in ipairs(batch) do c:Destroy() end
-		onK(math.min(i + BATCH - 1, total) / total)
+		local done = math.min(i + BATCH - 1, total)
+		onK(done / total, done, total)
 		if os.clock() - started > STAGE_CAP then break end
 	end
-	holder:Destroy()
-	onK(1)
+	sg:Destroy()
+	onK(1, total, total)
 end
 
-function Preload.run(gui: Instance, report: (number, string, number) -> ())
+function Preload.run(gui: Instance, report: (number, string, number, number?, number?) -> ())
 	local parent = script.Parent
 	local root = ReplicatedStorage:FindFirstChild("TyreCannon")
 	local assets = child(root, "Assets")
@@ -165,10 +180,10 @@ function Preload.run(gui: Instance, report: (number, string, number) -> ())
 		table.insert(stages[i], x)
 	end
 
-	-- 1 the yard: every stage of every yard, its machines and cannons, the lobby, the workbench and
-	-- the garage, the props and the people
+	-- 1 the yard: every stage of every yard, its machines and cannons, the lobby, the props and the
+	-- people (the Workshop and Garage asset folders stay in Assets but nothing in play uses them now)
 	local yard = {}
-	for _, name in ipairs({ "Props", "Characters", "Stages", "Lobby", "Cannons", "Machines", "Workshop", "Garage" }) do
+	for _, name in ipairs({ "Props", "Characters", "Stages", "Lobby", "Cannons", "Machines" }) do
 		contentOf(child(assets, name), yard)
 	end
 	contentOf(child(world, "Decor"), yard)
@@ -194,6 +209,11 @@ function Preload.run(gui: Instance, report: (number, string, number) -> ())
 		for _, id in pairs(Icons.Particle) do add(3, id) end
 	end
 	for _, id in ipairs(CODE_IMAGES) do add(3, id) end
+	-- every tyre's studio render (the grids show these)
+	local TyreShow = (select(2, pcall(require, parent:WaitForChild("TyreShow"))) :: any)
+	if type(TyreShow) == "table" and TyreShow.Icons then
+		for _, id in pairs(TyreShow.Icons) do add(3, id) end
+	end
 	-- 6 the sounds
 	if type(Sound) == "table" and Sound.Bank then
 		for _, def in pairs(Sound.Bank) do add(4, def.id) end
@@ -231,14 +251,29 @@ function Preload.run(gui: Instance, report: (number, string, number) -> ())
 		end
 	end
 
-	for i, name in ipairs(Preload.Stages) do
-		report(i, name, 0)
-		if i == #Preload.Stages then
-			warmUp(assets, function(k) report(i, name, k) end)
-		else
-			load(stages[i], function(k) report(i, name, k) end)
+	local blocking = { { 5, "THE INTERFACE" }, { 3, "THE TYRES" }, { 1, "THE YARD" }, { 2, "THE ROAD" }, { 4, "THE SOUNDS" } }
+	for i, b in ipairs(blocking) do
+		report(i, b[2], 0, 0, #stages[b[1]])
+		load(stages[b[1]], function(k, n, of) report(i, b[2], k, n, of) end)
+		report(i, b[2], 1, #stages[b[1]], #stages[b[1]])
+	end
+	local w = #blocking + 1
+	report(w, "WARMING UP", 0)
+	warmUp(assets, function(k, n, of) report(w, "WARMING UP", k, n, of) end)
+	report(w, "WARMING UP", 1)
+	Preload.pending = {}
+end
+
+-- after the loading screen: anything still pending, a small batch at a time, so the hub never
+-- stutters while it arrives (everything loads behind the loading screen now, so it's usually nothing)
+function Preload.background()
+	local lists = Preload.pending or {}
+	Preload.pending = nil
+	for _, list in ipairs(lists) do
+		for i = 1, #list, 8 do
+			pcall(function() ContentProvider:PreloadAsync(table.move(list, i, math.min(i + 7, #list), 1, {})) end)
+			task.wait(0.05)
 		end
-		report(i, name, 1)
 	end
 end
 

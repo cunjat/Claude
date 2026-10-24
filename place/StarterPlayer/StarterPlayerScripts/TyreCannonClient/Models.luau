@@ -88,6 +88,12 @@ local function fresh(template: Instance): Model
 		copy.Parent = m
 	end
 	modelFrame(m)
+	-- (2026-10-16) a single mesh that was imported lying down carries the turn that stands it up
+	-- (`Upright`, as the sad-sit chair uses it): placed anywhere, it stands
+	local upright = template:GetAttribute("Upright")
+	if typeof(upright) == "CFrame" and m.PrimaryPart and not template:IsA("Model") then
+		m.PrimaryPart.PivotOffset = (upright :: CFrame):Inverse()
+	end
 	return m
 end
 

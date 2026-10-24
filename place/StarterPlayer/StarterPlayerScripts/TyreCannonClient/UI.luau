@@ -420,7 +420,8 @@ end
 --==============================================================
 -- While it fades, a menu rides inside a CanvasGroup the size of its parent, so everything
 -- in it fades together; it goes back to its parent when the fade ends.
-local fades: { [GuiObject]: any } = setmetatable({}, { __mode = "k" }) :: any
+-- (plain tables, never weak: Roblox can collect an Instance key's Lua handle while the Instance lives)
+local fades: { [GuiObject]: any } = {}
 
 function UI.isFading(obj: GuiObject): boolean
 	local st = fades[obj]
@@ -436,6 +437,7 @@ function UI.fade(obj: GuiObject, show: boolean, opts: { [string]: any }?, done: 
 	if not st then
 		st = { token = 0 }
 		fades[obj] = st
+		obj.Destroying:Connect(function() fades[obj] = nil end)
 	end
 	st.token += 1
 	local token = st.token
@@ -508,16 +510,35 @@ end
 -- screen fitting: layouts are drawn for 1280x760 and scaled from there
 --==============================================================
 -- every scaled layout, so the UI size setting can refit them all at once
-local scaled: { [UIScale]: () -> () } = setmetatable({}, { __mode = "k" }) :: any
+local scaled: { [UIScale]: () -> () } = {}   -- (never weak: see fades)
 
-function UI.autoScale(obj: GuiObject, designW: number?, designH: number?): UIScale
+-- (2026-10-16, the phone pass) a short screen: a phone on its side (about 844 x 390). The HUD round
+-- the edges (hud = true) is drawn a little bigger there, where the room is; centred panels aren't,
+-- so they still fit
+local PHONE_H, PHONE_BOOST = 520, 1.15
+function UI.isPhone(): boolean
+	local cam = workspace.CurrentCamera
+	return cam ~= nil and cam.ViewportSize.Y > 0 and cam.ViewportSize.Y < PHONE_H
+end
+
+-- the scale a full-screen design (1280 x 760) is drawn at right now
+function UI.scaleNow(): number
+	local cam = workspace.CurrentCamera
+	if not cam then return 1 end
+	local v = cam.ViewportSize
+	return math.clamp(math.min(v.X / 1280, v.Y / 760), 0.5, 1.15) * (Prefs.get("uiScale") or 1)
+end
+
+function UI.autoScale(obj: GuiObject, designW: number?, designH: number?, hud: boolean?): UIScale
 	local sc = obj:FindFirstChildOfClass("UIScale") or UI.mk("UIScale", { Parent = obj })
 	local function fit()
 		local cam = workspace.CurrentCamera
 		if not cam then return end
 		local v = cam.ViewportSize
-		sc.Scale = math.clamp(math.min(v.X / (designW or 1280), v.Y / (designH or 760)), 0.5, 1.15) * (Prefs.get("uiScale") or 1)
+		local boost = if hud and UI.isPhone() then PHONE_BOOST else 1
+		sc.Scale = math.clamp(math.min(v.X / (designW or 1280), v.Y / (designH or 760)), 0.5, 1.15) * (Prefs.get("uiScale") or 1) * boost
 	end
+	if not scaled[sc] then sc.Destroying:Connect(function() scaled[sc] = nil end) end
 	scaled[sc] = fit
 	fit()
 	local cam = workspace.CurrentCamera
@@ -794,7 +815,7 @@ end
 --==============================================================
 -- titles: the tier decides the treatment
 --==============================================================
-local titleFx: { [TextLabel]: any } = setmetatable({}, { __mode = "k" }) :: any
+local titleFx: { [TextLabel]: any } = {}   -- (never weak: see fades)
 
 local function sample(colors: { Color3 }, u: number): Color3
 	local n = #colors
@@ -817,8 +838,22 @@ function UI.applyTitle(label: TextLabel, titleId: string?)
 	local tier = Config.TitleTiers[t.tier]
 	label.Visible = true
 	label.Text = string.upper(t.name)
-	label.TextStrokeColor3 = tier.colors[1]:Lerp(Color3.new(0, 0, 0), 0.82)
-	label.TextStrokeTransparency = tier.stroke and 0.25 or 0.7
+	-- in the game's own lettering: the heavy display face with the thick near-black edge every
+	-- other label has (the old thin tinted text stroke looked like a different game); the tier's
+	-- colour or moving gradient fills the letters
+	label.FontFace = UI.Fonts.display
+	label.TextStrokeTransparency = 1
+	local edge = label:FindFirstChild("TitleEdge") :: UIStroke?
+	if not edge then
+		edge = Instance.new("UIStroke")
+		edge.Name = "TitleEdge"
+		edge.LineJoinMode = Enum.LineJoinMode.Round
+		edge.Parent = label
+	end
+	local e = edge :: UIStroke
+	e.Color = Color3.fromRGB(14, 13, 12)
+	e.Thickness = math.clamp(label.TextSize * 0.1, 1.5, 2.5)
+	e.Transparency = 0.1
 	if tier.style == "solid" then
 		label.TextColor3 = tier.colors[1]
 		if grad then grad.Enabled = false end
@@ -837,6 +872,7 @@ function UI.applyTitle(label: TextLabel, titleId: string?)
 		g.Color = ColorSequence.new(tier.colors[1], tier.colors[2])
 		titleFx[label] = nil
 	else
+		if not titleFx[label] then label.Destroying:Connect(function() titleFx[label] = nil end) end
 		titleFx[label] = { grad = g, tier = tier, seed = math.random() }
 	end
 end

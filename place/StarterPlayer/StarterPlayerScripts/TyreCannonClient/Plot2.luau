@@ -13,9 +13,14 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Game = require(ReplicatedStorage:WaitForChild("TyreCannon"):WaitForChild("Modules"):WaitForChild("Game"))
+local Goals = require(ReplicatedStorage:WaitForChild("TyreCannon"):WaitForChild("Modules"):WaitForChild("Goals"))
 local UI = require(script.Parent.UI)
 local Kit = require(script.Parent.Kit)
 local Models = require(script.Parent.Models)
+-- prestige trims, the neon decor pack and the yard looks (the Prestige & Neon set, 2026-10-12)
+local PrestigeLook = require(script.Parent.PrestigeLook)
+local NeonDecor = require(script.Parent.NeonDecor)
+local YardLook = require(script.Parent.YardLook)
 local C = Kit.C
 
 local Plot2 = {}
@@ -209,6 +214,41 @@ function Plot2.new(gui: ScreenGui, remotes: Instance)
 	edit.root.ZIndex = 7
 	edit.root.Parent = face
 	edit.onClick = function() if self.onEditYard then self.onEditYard() end end
+	self.editBtn = edit
+
+	-- the stage's trial (Goals): one challenge on a run, needed with the cash to move up a stage
+	local card = UI.mk("Frame", { Name = "Trial", Position = UDim2.fromOffset(24, 452), Size = UDim2.fromOffset(560, 112), BackgroundTransparency = 1, ZIndex = 4, Parent = face })
+	Kit.slot(card, C.gold, 4)
+	UI.mk("ImageLabel", {
+		Position = UDim2.fromOffset(6, 10), Size = UDim2.fromOffset(84, 84), BackgroundTransparency = 1, Image = Kit.Icon.medal, ZIndex = 6, Parent = card,
+	})
+	local tag = Kit.text("STAGE TRIAL", 13, C.gold, 1.5)
+	tag.TextXAlignment = Enum.TextXAlignment.Left
+	tag.Position = UDim2.fromOffset(98, 10)
+	tag.Size = UDim2.fromOffset(200, 16)
+	tag.ZIndex = 6
+	tag.Parent = card
+	local what = Kit.text("", 21, C.text, 2)
+	what.TextXAlignment = Enum.TextXAlignment.Left
+	what.Position = UDim2.fromOffset(98, 28)
+	what.Size = UDim2.fromOffset(330, 26)
+	Kit.fit(what, 21, 12)
+	what.ZIndex = 6
+	what.Parent = card
+	local ttrack, tfill = Kit.bar(330, 16, C.gold)
+	ttrack.Position = UDim2.fromOffset(98, 60)
+	ttrack.ZIndex = 6
+	ttrack.Parent = card
+	local best = Kit.text("", 13, C.muted, 1.5, Kit.Body)
+	best.TextXAlignment = Enum.TextXAlignment.Left
+	best.Position = UDim2.fromOffset(98, 80)
+	best.Size = UDim2.fromOffset(330, 18)
+	Kit.fit(best, 14, 9)
+	best.ZIndex = 6
+	best.Parent = card
+	local chip, chipText = Kit.plate(card, "EVERY RUN COUNTS", C.grey, UDim2.fromOffset(440, 38), UDim2.fromOffset(110, 34), 6)
+	Kit.fit(chipText, 13, 8)
+	self.trial = { card = card, what = what, fill = tfill, best = best, chip = chip, chipText = chipText }
 	return self
 end
 
@@ -236,7 +276,7 @@ function Plot2:setProfile(p)
 			r.buy.setText("Max")
 			r.buy.setEnabled(false)
 		else
-			local price = Game.machinePrice(m.id, level, v.tier)
+			local price = Game.machinePrice(m.id, level, v.tier, v)
 			r.buy.setText("$" .. Game.short(price))
 			r.buy.setEnabled(p.credits >= price)
 		end
@@ -254,15 +294,45 @@ function Plot2:setProfile(p)
 	end
 	self.brings.Text = if top then "Your yard is a launch complex." else table.concat(text, "\n")
 	local reach = Game.reachMetres(v.mach, v.tier)
-	self.reachText.Text = "Your reach  <font color=\"#ECC478\">" .. Game.metres(reach) .. "</font>"
-	local cost = Game.plotUpgradeCost(math.min(v.tier, #Game.Tiers))
-	self.overFill.Size = UDim2.fromScale(if top then 1 else math.clamp(p.credits / cost, 0, 1), 1)
+	-- (2026-10-18: an estimate of an average run, so it says so; "your reach" read as wrong next to a better best)
+	self.reachText.Text = "Typical run  <font color=\"#ECC478\">" .. Game.metres(reach) .. "</font>"
+	local cost = if top then Game.prestigeCost(v) else Game.plotUpgradeCost(v.tier, v)
+	self.overFill.Size = UDim2.fromScale(math.clamp(p.credits / cost, 0, 1), 1)
 	local maxed = Game.machinesMaxed(v)
-	self.overText.Text = if top then "The top stage. Nothing left to build."
-		elseif not maxed then "Max the Cannon, Fuel Tank and Cooling to upgrade the yard."
-		else ("Upgrade the yard: all cash x%d for good. Machines start again at level 0; your tyres stay."):format(math.floor(Game.Overhaul.Mult + 0.5))
-	self.overBtn.setText(if top then "Top Stage" elseif not maxed then "Max Machines First" else ("Upgrade  $" .. Game.short(cost)))
-	self.overBtn.setEnabled(not top and maxed and p.credits >= cost)
+	-- the trial
+	local tr = v.trial
+	local trialOk = Game.trialDone(v)
+	if tr and tr.k then
+		local g = { k = tr.k, t = tr.t }
+		self.trial.what.Text = Goals.text(g)
+		self.trial.fill.Size = UDim2.fromScale(if tr.done then 1 else math.clamp((tr.best or 0) / math.max(tr.t, 1e-6), 0, 1), 1)
+		-- (short: the one line it has stays readable; the Stage Trials tip explains the rest)
+		self.trial.best.Text = if tr.done then "Done: this stage's trial is behind you."
+			else ("Your best %s  ·  every miss makes it easier"):format(Goals.progressText(g, tr.best or 0))
+		self.trial.chipText.Text = if tr.done then "DONE" else "EVERY RUN COUNTS"
+		local img = self.trial.chip:FindFirstChildWhichIsA("ImageLabel")
+		if img then img.ImageColor3 = if tr.done then C.green else C.grey end
+	end
+	-- at the top stage the same button prestiges (Game.Prestige): back to the Dirt Lot for good bonuses
+	local level = p.prestige or 0
+	local topPrestige = level >= Game.Prestige.Max
+	if top then
+		self.overText.Text = if topPrestige then ("Prestige %d: the very top. Nothing left to build."):format(level)
+			elseif not maxed then ("Max the Cannon, Fuel Tank and Cooling to prestige: all cash x%s for good."):format(("%g"):format(Game.prestigeMult(level + 1)))
+			else ("Prestige: start again from the Dirt Lot with nothing, for all cash x%s for good, %d keys and a perk you choose. Tyres, keys, decor and perks stay."):format(
+				("%g"):format(Game.prestigeMult(level + 1)), Game.Prestige.Keys + Game.Prestige.KeysPer * (level + 1))
+	else
+		self.overText.Text = if not maxed then "Max the Cannon, Fuel Tank and Cooling to upgrade the yard."
+			else ("Upgrade the yard: all cash x%d for good. Machines start again at level 0; your tyres stay."):format(math.floor(Game.Overhaul.Mult + 0.5))
+	end
+	if self.confirmPrestige then
+		self.overBtn.setText("Tap again to prestige")
+	elseif top then
+		self.overBtn.setText(if topPrestige then "Top Prestige" elseif not maxed then "Max Machines First" elseif not trialOk then "Finish the Trial" else ("Prestige  $" .. Game.short(cost)))
+	else
+		self.overBtn.setText(if not maxed then "Max Machines First" elseif not trialOk then "Finish the Trial" else ("Upgrade  $" .. Game.short(cost)))
+	end
+	self.overBtn.setEnabled(maxed and trialOk and p.credits >= cost and not (top and topPrestige))
 end
 
 function Plot2:open()
@@ -297,7 +367,36 @@ function Plot2:buy(id: string)
 	end
 end
 
+-- the top stage's button: prestige, after a second tap within 4 s (it starts the yard again)
+function Plot2:prestige()
+	if not self.confirmPrestige then
+		self.confirmPrestige = true
+		if self.profile then self:setProfile(self.profile) end
+		task.delay(4, function()
+			self.confirmPrestige = nil
+			if self.profile then self:setProfile(self.profile) end
+		end)
+		return
+	end
+	self.confirmPrestige = nil
+	local ok, res = pcall(function() return (self.R :: any).Prestige:InvokeServer() end)
+	if ok and type(res) == "table" and res.ok then
+		self:close()
+		Kit.callout(self.gui, "PRESTIGE " .. tostring(res.level) .. "!", C.accent, UDim2.fromScale(0.5, 0.35), 80)
+		task.delay(0.5, function()
+			Kit.callout(self.gui, ("ALL CASH x%s  ·  +%d KEYS"):format(("%g"):format(res.mult), res.keys), C.white, UDim2.fromScale(0.5, 0.45), 44)
+		end)
+	elseif ok and type(res) == "table" and res.err then
+		Kit.callout(self.gui, string.upper(res.err), C.red, UDim2.fromScale(0.5, 0.18), 30)
+	end
+end
+
 function Plot2:overhaul()
+	local pv = self.profile and self.profile.v2
+	if pv and pv.tier >= #Game.Tiers then
+		self:prestige()
+		return
+	end
 	-- the upgrade is a scene (StageUp): it starts the purchase itself once the camera is moving
 	if self.upgradeScene then
 		self:close()
@@ -496,6 +595,19 @@ function Plot2:watchYards()
 	-- hidden (other systems may touch parts of it)
 	task.spawn(function()
 		while not Models.get("Cannons/Cannon1") do task.wait(3) end
+		-- (2026-10-24: the place streams, so a rig part that streams back in shows until the next sweep;
+		-- hide it as it arrives too)
+		for _, plot in ipairs(plots:GetChildren()) do
+			local queued = false
+			plot.DescendantAdded:Connect(function(d)
+				if queued or not d:IsA("BasePart") then return end
+				queued = true
+				task.defer(function()
+					queued = false
+					hideOldRig(plot)
+				end)
+			end)
+		end
 		while true do
 			for _, plot in ipairs(plots:GetChildren()) do hideOldRig(plot) end
 			task.wait(3)
@@ -512,6 +624,9 @@ function Plot2:watchYard(plot: Instance)
 	end
 	plot:GetAttributeChangedSignal("V2_Tier"):Connect(refresh)
 	plot:GetAttributeChangedSignal("V2_Layout"):Connect(refresh)
+	plot:GetAttributeChangedSignal("V2_Prestige"):Connect(refresh)
+	plot:GetAttributeChangedSignal("V2_Look"):Connect(refresh)
+	plot:GetAttributeChangedSignal("V2_Showcase"):Connect(refresh)
 	refresh()
 end
 
@@ -559,24 +674,30 @@ function Plot2:renderDecor(plot: Instance, decor: { Game.DecorSpot }, lifts: { [
 	y.decor = y.decor or {}
 	for i, d in ipairs(decor) do
 		local e = y.decor[i]
-		if e and e.k ~= d.k then
+		local kind = Game.YardDecorById[d.k]
+		local tint = if kind and kind.build then NeonDecor.optsFor(plot) else nil
+		local tintKey = if tint then table.concat({ tostring(tint.color), tostring(tint.a), tostring(tint.level), tostring(tint.showcase) }, "|") else nil
+		if e and (e.k ~= d.k or e.tint ~= tintKey) then
 			e.model:Destroy()
 			e = nil
 			y.decor[i] = nil
 		end
 		if not e then
-			local kind = Game.YardDecorById[d.k]
-			local tpl = kind and Models.get(kind.path)
-			if tpl then
-				local m = Models.place(tpl, folder, CFrame.new(), 1, true)
+			local tpl = kind and not kind.build and Models.get(kind.path)
+			local built = kind and kind.build and NeonDecor.build(kind.id, tint)
+			if built then built.Parent = folder end
+			if tpl or built then
+				local m = built or Models.place(tpl, folder, CFrame.new(), 1, true)
 				local cf, size = m:GetBoundingBox()
 				local seat = m:GetPivot():PointToObjectSpace(cf.Position - Vector3.new(0, size.Y / 2, 0))
-				e = { k = d.k, model = m, seat = seat }
+				e = { k = d.k, model = m, seat = seat, tint = tintKey }
 				y.decor[i] = e
 			end
 		end
 		if e then
-			local at = base * CFrame.new(d.x, 2, d.z) * CFrame.Angles(0, (d.r % 4) * math.pi / 2, 0)
+			-- (`a` may be fractional while the editor eases it round)
+			local steps = if type(d.a) == "number" then d.a else (d.r % 4) * 6
+			local at = base * CFrame.new(d.x, 2, d.z) * CFrame.Angles(0, math.rad(steps * 15), 0)
 			if lifts and lifts[i] then at = at * lifts[i] end
 			e.model:PivotTo(at * CFrame.new(-e.seat))
 		end
@@ -620,6 +741,11 @@ function Plot2:buildYard(plot: Instance)
 	local layout = self:layoutOf(plot)
 	for _, mdef in ipairs(Game.Machines) do
 		local id = mdef.id
+		-- (2026-10-23, the owner: "the plot should have all the fuel tank cooling etc. before they're level
+		-- one ... the unclaimed plots ... look terrible") every machine stands on every yard from level 0,
+		-- and a yard nobody has yet shows the starter yard, not a bare slab
+		-- (2026-10-24, the owner: an unclaimed yard shows no launch gear at all, just its sandy ground and
+		-- its fence: you're given a yard as you join, so a free one is plainly free)
 		local level = if owned then (plot:GetAttribute("V2_" .. id) or 0) else nil
 		-- a machine that's already standing just moves if the layout changed (unless it's being edited)
 		local spot = base * Game.yardSpot(layout, id)
@@ -632,13 +758,13 @@ function Plot2:buildYard(plot: Instance)
 		end
 		local tierNow = (plot:GetAttribute("V2_Tier") :: number?) or 1
 		if level ~= y.levels[id] or (id == "cannon" and y.cannonTier ~= tierNow) then
-			if id == "cannon" then y.cannonTier = tierNow end
+			if id == "cannon" then y.cannonTier = tierNow; y.trimLevel = nil end
 			if y.machines[id] then y.machines[id]:Destroy() end
 			y.machines[id] = nil
 			local had = y.levels[id]
 			y.levels[id] = level
 			-- a machine stands on the yard once it's bought (the cannon from the start)
-			if level and (level > 0 or id == "cannon") then
+			if level then
 				local m = Instance.new("Model")
 				m.Name = id
 				local at = spot
@@ -659,7 +785,7 @@ function Plot2:buildYard(plot: Instance)
 				elseif BUILD[id] and SHOW_STANDINS then
 					BUILD[id](m, at, level)
 				end
-				levelPlate(m, at, id, level)
+				if owned then levelPlate(m, at, id, level) end
 				m.Parent = folder
 				y.machines[id] = m
 				y.at[id] = at
@@ -669,8 +795,17 @@ function Plot2:buildYard(plot: Instance)
 			end
 		end
 	end
-	-- the decor (the yard editor draws it itself while it's open)
-	if not y.editing then self:renderDecor(plot, if owned then (layout.decor or {}) else {}) end
+	-- the cannon's prestige trim (PrestigeLook), redone when the cannon is rebuilt or the level moves
+	local prestige = if owned then ((plot:GetAttribute("V2_Prestige") :: number?) or 0) else 0
+	if y.machines.cannon and y.trimLevel ~= prestige then
+		y.trimLevel = prestige
+		PrestigeLook.trimCannon(y.machines.cannon, prestige, Plot2.ModelScale.cannon)
+	end
+	-- the decor (the yard editor draws it itself while it's open) and the yard's look
+	if not y.editing then
+		self:renderDecor(plot, if owned then (layout.decor or {}) else {})
+		YardLook.apply(plot, layout)
+	end
 end
 
 function Plot2.paintStage(model: Instance, tier: number)

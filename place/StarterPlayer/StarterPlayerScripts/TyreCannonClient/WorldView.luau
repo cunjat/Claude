@@ -300,10 +300,13 @@ end
 
 --==============================================================
 -- parent: where the world goes (a ViewportFrame's WorldModel for a photo). opts.scenery builds
--- only the road, props, decor and obstacles: no pickups, pads or gate labels.
+-- only the road, props, decor and obstacles: no pickups, pads or gate labels. opts.backdrop is the
+-- same road with its land, horizon and light all round it (the loading scene): no pickups, pads,
+-- targets or gate labels either.
 function WorldView.new(trackId: string, parent: Instance?, opts: { [string]: any }?)
 	local self = setmetatable({}, WorldView)
-	self.sceneryOnly = opts ~= nil and opts.scenery == true
+	self.backdrop = opts ~= nil and opts.backdrop == true
+	self.sceneryOnly = opts ~= nil and (opts.scenery == true or opts.backdrop == true)
 	self.track = TrackGen.get(trackId)
 	self.cfg = self.track.cfg
 	self.land = LANDS[self.cfg.scenery] or LANDS.fields
@@ -329,13 +332,13 @@ function WorldView.new(trackId: string, parent: Instance?, opts: { [string]: any
 	debris.Parent = root
 	self.debris = debris
 
-	if not self.sceneryOnly then
+	if not self.sceneryOnly or self.backdrop then
 		self:buildApron()
 		self:buildHorizon()
 		if self.track.isRoad then self:buildSkirt() end
 	end
 	-- the road's zones each bring their own light, grade, haze and air
-	if self.track.isRoad and not self.sceneryOnly then self.look = ZoneLook.new() end
+	if self.track.isRoad and (not self.sceneryOnly or self.backdrop) then self.look = ZoneLook.new() end
 	return self
 end
 
@@ -730,6 +733,11 @@ function WorldView:markRoad(f: Instance, s: number, top: CFrame, len: number, ba
 		end
 		for side = -1, 1, 2 do
 			newPart(f, "EdgeLine", Vector3.new(len + 0.4, 0.2, 2), top * CFrame.new(0, 0.1, side * (half - 6)), WHITE_PAINT, Enum.Material.SmoothPlastic)
+			-- (2026-10-23, speed you can feel) white delineator posts with an amber reflector every 50 studs
+			if s % 2 == 0 then
+				newPart(f, "Delineator", Vector3.new(0.7, 3.6, 0.7), top * CFrame.new(0, 1.8, side * (half - 2)), WHITE_PAINT, Enum.Material.SmoothPlastic)
+				newPart(f, "Reflector", Vector3.new(0.75, 0.7, 0.75), top * CFrame.new(0, 3.1, side * (half - 2)), Color3.fromRGB(255, 150, 30), Enum.Material.SmoothPlastic)
+			end
 		end
 	elseif style == "dirt" then
 		-- worn wheel ruts, and the verge creeping in along the edges
@@ -739,6 +747,16 @@ function WorldView:markRoad(f: Instance, s: number, top: CFrame, len: number, ba
 		end
 		for side = -1, 1, 2 do
 			newPart(f, "Verge", Vector3.new(len + 0.4, 0.14, 26), top * CFrame.new(0, 0.07, side * (half - 13)), verge, Enum.Material.Grass)
+		end
+		-- (2026-10-23, speed you can feel) whitewashed edge stones with a red band, every 50 studs along
+		-- the lane, as on village roads: low enough to roll over, close enough to stream past
+		local laneW = (land or self.land).lane
+		if laneW and s % 2 == 0 then
+			for side = -1, 1, 2 do
+				local z = side * (laneW / 2 + 3)
+				newPart(f, "EdgeStone", Vector3.new(2.2, 1.6, 2.2), top * CFrame.new(0, 0.7, z), WHITE_PAINT, Enum.Material.Concrete)
+				newPart(f, "EdgeBand", Vector3.new(2.26, 0.45, 2.26), top * CFrame.new(0, 1.2, z), Color3.fromRGB(196, 52, 40), Enum.Material.SmoothPlastic)
+			end
 		end
 	elseif style == "gravel" then
 		-- a haul road: deep truck ruts and a gravel berm along each edge
@@ -788,6 +806,12 @@ function WorldView:markRoad(f: Instance, s: number, top: CFrame, len: number, ba
 			end
 		end
 	else
+		-- (2026-10-23, speed you can feel) a wooden stake marking the track every 75 studs
+		if s % 3 == 0 then
+			for side = -1, 1, 2 do
+				newPart(f, "Stake", Vector3.new(0.6, 2.6, 0.6), top * CFrame.new(0, 1.2, side * 58) * CFrame.Angles(0, 0, side * 0.08), Color3.fromRGB(120, 88, 58), Enum.Material.Wood)
+			end
+		end
 		-- sand: old tracks half blown over
 		if s % 3 ~= 2 then
 			local rut = band.ground:Lerp(Color3.fromRGB(120, 90, 60), 0.14)
@@ -1127,13 +1151,24 @@ end
 function WorldView:makeMetal(parent: Instance, data)
 	local def = Config.MetalsById[data.kind]
 	if not def then return nil end
-	local tpl = Assets.Props:FindFirstChild("Coin") :: BasePart?
+	-- (2026-10-23: the Blender coin (hubkit.coin) files as a Model holding one mesh; the old stock disc
+	-- was a bare MeshPart. Either lies flat and is stood up by Upright; its baked look is dropped so
+	-- the Metal colour below shows)
+	local found = Assets.Props:FindFirstChild("Coin")
+	local tpl: BasePart? = nil
+	if found and found:IsA("Model") then
+		tpl = found.PrimaryPart or found:FindFirstChildWhichIsA("BasePart")
+	elseif found and found:IsA("BasePart") then
+		tpl = found
+	end
 	local coin: BasePart
 	local upright = CFrame.new()
 	if tpl then
 		coin = tpl:Clone()
+		local sa = coin:FindFirstChildOfClass("SurfaceAppearance")
+		if sa then sa:Destroy() end
 		coin.Size = tpl.Size * 2.4
-		upright = tpl:GetAttribute("Upright") or CFrame.new()
+		upright = (found :: Instance):GetAttribute("Upright") or tpl:GetAttribute("Upright") or CFrame.Angles(math.pi / 2, 0, 0)
 	else
 		coin = newPart(nil, "Coin", Vector3.new(6.7, 1.1, 7), CFrame.new(), def.color, Enum.Material.Metal)
 		coin.Shape = Enum.PartType.Cylinder
@@ -1613,6 +1648,53 @@ function WorldView:buildCountryside(f: Instance, ci: number, land)
 		end
 	end
 	self:dressZone(kind, put, row, r, x0, half)
+	-- (2026-10-24, the owner: fill the run's background "like the desert terrain" in the lobby) the belt
+	-- between the fields and the far hills, 500 to 1,800 out, was bare: now each zone's own big shapes
+	-- stand in it, no shadows (they're far): the Thar's dune ridges, the Backroad's poplar lines along
+	-- the field edges and its villages, the Grand Trunk's eucalyptus stands
+	local function far(name: string, x: number, z: number, scale: number, yaw: number?)
+		local m = put(name, x, z, scale, yaw, 0.6)
+		if m then settle(m, false) end
+		return m
+	end
+	for _, side in ipairs({ -1, 1 }) do
+		if kind == "dunes" then
+			for k = 1, 2 do
+				local z = side * r:NextNumber(560 + (k - 1) * 520, 1000 + (k - 1) * 700)
+				local m = far("DuneRidge", x0 + r:NextNumber(0, CHUNK), z, r:NextNumber(5, 9) + (k - 1) * 4, 0)
+				if m then
+					-- its length along the road, its slip face to it
+					local _, size = m:GetBoundingBox()
+					local yaw = (if size.X >= size.Z then 0 else math.pi / 2) + (if side > 0 then math.pi else 0) + r:NextNumber(-0.2, 0.2)
+					m:PivotTo(CFrame.new(m:GetPivot().Position) * CFrame.Angles(0, yaw, 0))
+				end
+			end
+		elseif kind == "backroad" then
+			-- a poplar line along a field edge (one side a chunk, in turn), and now and then a village
+			if (ci + (if side > 0 then 1 else 0)) % 2 == 0 then
+				local z = side * r:NextNumber(520, 1500)
+				local x = x0 + r:NextNumber(0, 20)
+				while x < x0 + CHUNK do
+					if r:NextNumber() > 0.2 then far("Poplar", x, z + r:NextNumber(-4, 4), r:NextNumber(1.1, 1.5)) end
+					x += r:NextNumber(20, 28)
+				end
+			end
+			if r:NextNumber() < 0.3 then
+				local x, z = x0 + r:NextNumber(40, CHUNK - 40), side * r:NextNumber(600, 1300)
+				for k = 1, r:NextInteger(2, 4) do
+					far("VillageHouse", x + r:NextNumber(-40, 40), z + side * r:NextNumber(-30, 30), r:NextNumber(1.1, 1.4))
+				end
+				for k = 1, 3 do far("Safeda", x + r:NextNumber(-60, 60), z + side * r:NextNumber(20, 60), r:NextNumber(1.0, 1.3)) end
+			end
+		elseif kind == "highway" then
+			-- a stand of eucalyptus out in the plain, a neem or two
+			local cx, cz = x0 + r:NextNumber(30, CHUNK - 30), side * r:NextNumber(480, 1400)
+			for k = 1, r:NextInteger(4, 7) do
+				far("backroad/Safeda", cx + r:NextNumber(-50, 50), cz + side * r:NextNumber(-30, 30), r:NextNumber(1.0, 1.35))
+			end
+			if r:NextNumber() < 0.5 then far("dunes/Khejri", x0 + r:NextNumber(0, CHUNK), side * r:NextNumber(450, 1200), r:NextNumber(1.1, 1.5)) end
+		end
+	end
 	if kind == "highway" then
 		-- the Grand Trunk is lined with eucalyptus both sides, close in, with gaps
 		for _, side in ipairs({ -1, 1 }) do
@@ -1690,7 +1772,7 @@ function WorldView:buildCountryside(f: Instance, ci: number, land)
 			if r:NextNumber() < 0.5 then put("Kup", x + r:NextNumber(-16, 16), z + side * r:NextNumber(10, 16), r:NextNumber(0.75, 1.0)) end
 		end
 		if r:NextNumber() < 0.16 then
-			local name = r:NextNumber() < 0.6 and "Goat" or "Buffalo"
+			local name = "Goat" -- (2026-10-23, the owner: no cows; goats only on the verges)
 			local x = x0 + r:NextNumber(0, CHUNK)
 			put(name, x, side * r:NextNumber(half + 18, LAND_NEAR - 10), name == "Goat" and 1.3 or 1.15, side > 0 and math.pi or 0)
 			if name == "Goat" and r:NextNumber() < 0.6 then
@@ -1845,7 +1927,20 @@ end
 -- chunk build / teardown
 --==============================================================
 function WorldView:buildChunk(ci: number, withDecor: boolean)
-	if self.chunks[ci] then return end
+	-- (2026-10-18) a chunk built out past the decor range gets its decor once it comes into range; it
+	-- used to return here, so every chunk after the first few had bare verges for the whole run
+	self.decorDone = self.decorDone or {}
+	local existing = self.chunks[ci]
+	if existing then
+		if withDecor and not self.decorDone[ci] then
+			self.decorDone[ci] = true
+			local land = self:landAt(ci * CHUNK + CHUNK / 2)
+			self:buildDecor(existing, ci)
+			if land.countryside then self:buildCountryside(existing, ci, land) end
+		end
+		return
+	end
+	if withDecor then self.decorDone[ci] = true end
 	local track = self.track
 	local cfg = self:cfgAt(ci * CHUNK + CHUNK / 2)
 	local land = self:landAt(ci * CHUNK + CHUNK / 2)
@@ -1907,7 +2002,7 @@ function WorldView:buildChunk(ci: number, withDecor: boolean)
 			self.obstacleNodes[o.key] = self:makeObstacle(f, o)
 		end
 	end
-	for _, t in ipairs(track:targetsForChunk(ci)) do
+	for _, t in ipairs(if self.backdrop then {} else track:targetsForChunk(ci)) do
 		local node = self:makeTarget(f, t)
 		if node then self.targetNodes[t.key] = node end
 	end
@@ -1973,12 +2068,27 @@ function WorldView:dropChunk(ci: number)
 	for _, t in ipairs(self.track:targetsForChunk(ci)) do self.targetNodes[t.key] = nil end
 	f:Destroy()
 	self.chunks[ci] = nil
+	if self.decorDone then self.decorDone[ci] = nil end
 end
 
-function WorldView:ensure(x: number)
+-- (2026-10-24) budget: how many chunks (or a chunk's decor) may be built this call past the one the
+-- tyre is on and the next. Per-frame callers pass 1, so a fast tyre no longer builds a run of whole
+-- chunks in one frame (a hitch); without it everything in range is built (the first frame).
+function WorldView:ensure(x: number, budget: number?)
 	local ci = math.max(0, math.floor(x / CHUNK))
+	local left = budget or math.huge
+	self.decorDone = self.decorDone or {}
 	for c = math.max(0, ci - BEHIND), ci + AHEAD_GROUND do
-		self:buildChunk(c, c <= ci + AHEAD_DECOR)
+		local decor = c <= ci + AHEAD_DECOR
+		local needed = not self.chunks[c] or (decor and not self.decorDone[c])
+		if needed then
+			if c <= ci + 1 then
+				self:buildChunk(c, decor)
+			elseif left > 0 then
+				left -= 1
+				self:buildChunk(c, decor)
+			end
+		end
 	end
 	for c in pairs(self.chunks) do
 		if c < ci - BEHIND or c > ci + AHEAD_GROUND then self:dropChunk(c) end

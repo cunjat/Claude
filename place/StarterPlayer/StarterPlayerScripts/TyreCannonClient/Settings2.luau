@@ -212,6 +212,25 @@ function Settings2.new(gui: ScreenGui, previewDance: (() -> ())?)
 			task.delay(0.25, previewDance)
 		end
 	end
+	-- the playtest's notes (Feedback)
+	local fb = Kit.button("Send Feedback", C.green, UDim2.fromOffset(220, 44), 18)
+	fb.root.AnchorPoint = Vector2.new(1, 0)
+	fb.root.Position = UDim2.new(1, -28, 0, 448)
+	fb.root.ZIndex = 8
+	fb.root.Parent = face
+	fb.onClick = function()
+		self:close()
+		if self.onFeedback then task.delay(0.25, self.onFeedback) end
+	end
+	-- (2026-10-16) what everything does, and the tutorial again (Help)
+	local help = Kit.button("Help & Tutorial", C.blue, UDim2.fromOffset(220, 44), 18)
+	help.root.Position = UDim2.fromOffset(28, 448)
+	help.root.ZIndex = 8
+	help.root.Parent = face
+	help.onClick = function()
+		self:close()
+		if self.onHelp then task.delay(0.25, self.onHelp) end
+	end
 	local tip = Kit.text("Shift lock: press Ctrl in the yard.", 14, C.muted, 1.5, Kit.Body)
 	tip.Position = UDim2.fromOffset(0, 462)
 	tip.Size = UDim2.new(1, 0, 0, 22)

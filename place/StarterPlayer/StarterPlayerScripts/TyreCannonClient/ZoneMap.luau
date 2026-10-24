@@ -21,15 +21,15 @@ ZoneMap.__index = ZoneMap
 -- each zone's look: its colour and its emblem (a studio render of its signature thing), and a line
 local LOOK = {
 	backroad = {
-		color = Color3.fromRGB(150, 205, 60), emblem = "rbxassetid://83152526890742", pic = "rbxassetid://96177458923825",
+		color = Color3.fromRGB(150, 205, 60), emblem = "rbxassetid://83152526890742", pic = "rbxassetid://79069928272383",
 		blurb = "Village lanes through the Punjab fields: mustard either side, poplars along the canal, a tube well thumping and a buffalo that will not move.",
 	},
 	highway = {
-		color = Color3.fromRGB(255, 128, 40), emblem = "rbxassetid://139037651079434", pic = "rbxassetid://109289235049196",
+		color = Color3.fromRGB(255, 128, 40), emblem = "rbxassetid://139037651079434", pic = "rbxassetid://118297118811829",
 		blurb = "The Grand Trunk Road into the sunset: painted goods trucks pulled in at the dhaba, and the pylons marching off to the haze.",
 	},
 	dunes = {
-		color = Color3.fromRGB(176, 112, 240), emblem = "rbxassetid://136591911534456", pic = "rbxassetid://78657262671906",
+		color = Color3.fromRGB(176, 112, 240), emblem = "rbxassetid://136591911534456", pic = "rbxassetid://84128263292542",
 		blurb = "The Thar at dusk: dunes over the tarmac, a khejri bent by the wind, a camel on the ridge and a chhatri standing alone.",
 	},
 }
@@ -97,12 +97,14 @@ function ZoneMap.new(gui: ScreenGui, onPick: (string) -> ())
 		Kit.slot(card, look.color, 8)
 		local ring = UI.mk("ImageLabel", {
 			Name = "Scene", Position = UDim2.fromOffset(8, 8), Size = UDim2.new(1, -16, 1, -16), BackgroundTransparency = 1,
-			Image = look.pic or "", ScaleType = Enum.ScaleType.Crop, ImageTransparency = 0.45, ZIndex = 9, Parent = card,
+			Image = look.pic or "", ScaleType = Enum.ScaleType.Crop, ImageTransparency = 0, ZIndex = 9, Parent = card,
 		}, { UI.corner(10) })
+		-- (2026-10-16) the zone's own picture is the card now (zone_cards.py, the road as it looks in a
+		-- run): the old emblem over a faded scene read as dated
 		-- the emblem sits in the middle of its card, clear of every edge
 		local emblem = UI.mk("ImageLabel", {
 			Name = "Emblem", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(125, 54), Size = UDim2.fromOffset(EMBLEM, EMBLEM),
-			BackgroundTransparency = 1, Image = look.emblem, ScaleType = Enum.ScaleType.Fit, ZIndex = 10, Parent = inner,
+			BackgroundTransparency = 1, Image = look.emblem, ScaleType = Enum.ScaleType.Fit, ZIndex = 10, Visible = false, Parent = inner,
 		})
 		-- the node on the road
 		local node = UI.mk("Frame", {
@@ -152,6 +154,12 @@ function ZoneMap.new(gui: ScreenGui, onPick: (string) -> ())
 	local card = UI.mk("Frame", { Position = UDim2.fromOffset(34, 336), Size = UDim2.fromOffset(W - 68, 186), BackgroundTransparency = 1, ZIndex = 5, Parent = face })
 	Kit.slice("panel_body", nil, card, 5, 0.4)
 	self.cardEdge = Kit.slice("panel_ring", C.teal, card, 6, 0.4)
+	-- the picked zone's picture, fading in from behind the words to the right-hand side
+	self.backdrop = UI.mk("ImageLabel", {
+		AnchorPoint = Vector2.new(1, 0.5), Position = UDim2.new(1, -10, 0.5, 0), Size = UDim2.fromOffset(560, 166), BackgroundTransparency = 1,
+		ScaleType = Enum.ScaleType.Crop, ZIndex = 6, Parent = card,
+	}, { UI.corner(12) })
+	UI.mk("UIGradient", { Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(0.55, 0.45), NumberSequenceKeypoint.new(1, 0.2) }), Parent = self.backdrop })
 	self.title = Kit.text("", 30, C.white, 3)
 	self.title.TextXAlignment = Enum.TextXAlignment.Left
 	self.title.Position = UDim2.fromOffset(24, 14)
@@ -204,9 +212,11 @@ function ZoneMap:show(id: string)
 		local on = zid == id
 		Kit.tween(s.inner, 0.16, { Position = UDim2.fromOffset(0, on and -10 or 0) }, Enum.EasingStyle.Back)
 		Kit.tween(s.emblem, 0.16, { Size = if on then UDim2.fromOffset(EMBLEM_ON, EMBLEM_ON) else UDim2.fromOffset(EMBLEM, EMBLEM) }, Enum.EasingStyle.Back)
-		Kit.tween(s.glow, 0.16, { ImageTransparency = if on then 0 else 0.5 })
+		Kit.tween(s.glow, 0.16, { ImageTransparency = if on then 0 else 0.25 })
 	end
 	self.title.Text = string.upper(z.name)
+	self.backdrop.Image = look.pic or ""
+	self.backdrop.ImageColor3 = if open then Color3.new(1, 1, 1) else Color3.fromRGB(110, 108, 118)
 	self.cardEdge.ImageColor3 = look.color
 	self.blurb.Text = look.blurb
 	self.facts.Text = ("x%.2f cash a metre  ·  from %s  ·  %d key crate"):format(z.rate, Game.metres(z.start), z.keys)
@@ -232,6 +242,7 @@ function ZoneMap:refresh()
 		s.status.Text = open and ("from %s"):format(Game.metres(z.start)) or ("reach %s"):format(Game.metres(z.start))
 		s.lock.Visible = not open
 		s.emblem.ImageColor3 = if open then Color3.new(1, 1, 1) else Color3.fromRGB(96, 94, 104)
+		s.glow.ImageColor3 = if open then Color3.new(1, 1, 1) else Color3.fromRGB(110, 108, 118)
 		s.node.BackgroundColor3 = if open then LOOK[z.id].color else Color3.fromRGB(80, 80, 88)
 		s.chip.Visible = z.id == self.pick
 	end

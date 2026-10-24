@@ -1,8 +1,8 @@
 --!strict
 -- TYRE CANNON :: ShiftLock
 -- Our own shift lock, on Ctrl because Shift is sprint. While it's on the mouse is held at the
--- centre under the steel crosshair, the camera swings over your right shoulder on a spring (a
--- little overshoot, and it leans out the way you strafe), and you turn to face where it looks,
+-- centre under the steel crosshair, the camera glides over your right shoulder on a spring (it
+-- settles without a wobble, leans out the way you strafe and stops short of walls), and you turn to face where it looks,
 -- quickly but never in a snap. The badge in the bottom right is a hub tile (the padlock, CTRL on
 -- it), lit green when it's on; click it to toggle. A word flashes by the crosshair.
 -- It stands aside whenever the camera isn't following you on foot: the workbench, a run,
@@ -19,9 +19,9 @@ local C = Kit.C
 local ShiftLock = {}
 ShiftLock.__index = ShiftLock
 
-local SHOULDER = Vector3.new(1.85, 0.2, 0)
-local LEAN = 0.35          -- how far the camera leans out the way you strafe
-local TURN_RATE = 16       -- how fast you turn to face the camera (higher is snappier)
+local SHOULDER = Vector3.new(1.7, 0.45, 0)   -- over the right shoulder, a touch high
+local LEAN = 0.3           -- how far the camera leans out the way you strafe
+local TURN_RATE = 18       -- how fast you turn to face the camera (eased; higher is snappier)
 ShiftLock.Keys = { Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl }
 
 local ON_COL = Color3.fromRGB(110, 230, 120)
@@ -68,7 +68,9 @@ function ShiftLock.new(gui: ScreenGui, blocked: (() -> boolean)?)
 	self:paint(false)
 
 	UserInputService.InputBegan:Connect(function(input, gpe)
-		if gpe or UserInputService:GetFocusedTextBox() then return end
+		-- (2026-10-18: not while it's switched off, e.g. in a run, where Ctrl tucks; it used to flip shift
+		-- lock in the background and flash SHIFT LOCK ON by the crosshair)
+		if gpe or UserInputService:GetFocusedTextBox() or not self.allowed then return end
 		if table.find(ShiftLock.Keys, input.KeyCode) then self:toggle() end
 	end)
 	UserInputService.LastInputTypeChanged:Connect(function() self:refreshBadge() end)
@@ -151,36 +153,54 @@ function ShiftLock:step(dt: number)
 	end
 	self.active = active
 
-	-- the shoulder swing: a spring with a little overshoot
+	-- the shoulder swing: a critically damped spring, so it glides over and settles without a wobble
 	local target = active and 1 or 0
-	self.blendVel += ((target - self.blend) * 220 - self.blendVel * 22) * dt
-	self.blend += self.blendVel * dt
+	local k = 120
+	self.blendVel += ((target - self.blend) * k - self.blendVel * 2 * math.sqrt(k)) * dt
+	self.blend = math.clamp(self.blend + self.blendVel * dt, 0, 1.05)
 	if target == 0 and self.blend < 0.002 and math.abs(self.blendVel) < 0.01 then
 		self.blend, self.blendVel = 0, 0
 	end
 
 	if active and hum and root and cam then
-		-- face where the camera looks, quickly but not in a snap
+		-- face where the camera looks: eased, the same at any frame rate
 		local look = cam.CFrame.LookVector
 		local flat = Vector3.new(look.X, 0, look.Z)
 		if flat.Magnitude > 0.01 then
 			local want = math.atan2(-flat.X, -flat.Z)
 			local _, yaw, _ = root.CFrame:ToEulerAnglesYXZ()
 			local d = (want - yaw + math.pi) % (2 * math.pi) - math.pi
-			local turned = yaw + d * math.min(1, dt * TURN_RATE)
+			local turned = yaw + d * (1 - math.exp(-dt * TURN_RATE))
 			root.CFrame = CFrame.new(root.Position) * CFrame.fromEulerAnglesYXZ(0, turned, 0)
 		end
 		-- lean out the way you strafe
 		local move = hum.MoveDirection
 		local side = if move.Magnitude > 0.1 then cam.CFrame.RightVector:Dot(move) else 0
-		self.lean += (side * LEAN - self.lean) * math.min(1, dt * 6)
+		self.lean += (side * LEAN - self.lean) * (1 - math.exp(-dt * 5))
 	else
-		self.lean += (0 - self.lean) * math.min(1, dt * 6)
+		self.lean += (0 - self.lean) * (1 - math.exp(-dt * 5))
 	end
 
-	if hum then
-		local want = SHOULDER * self.blend + Vector3.new(self.lean, 0, 0)
-		if (hum.CameraOffset - want).Magnitude > 0.0005 then hum.CameraOffset = want end
+	-- the offset rides in camera space (the humanoid's offset turns with the body, so it swung
+	-- about whenever you turned faster than the character); nothing left on the humanoid
+	if hum and hum.CameraOffset.Magnitude > 0 and self.blend > 0 then hum.CameraOffset = Vector3.zero end
+	if cam and self.blend > 0.001 and cam.CameraType == Enum.CameraType.Custom then
+		local cf = cam.CFrame
+		-- zoomed right in: the shoulder folds away so first person stays centred
+		local dist = (cf.Position - cam.Focus.Position).Magnitude
+		local near = math.clamp((dist - 1) / 4, 0, 1)
+		local off = cf:VectorToWorldSpace((SHOULDER + Vector3.new(self.lean, 0, 0)) * self.blend * near)
+		local len = off.Magnitude
+		if len > 0.01 then
+			-- never through a wall: stop short of whatever is beside you
+			local params = RaycastParams.new()
+			params.FilterType = Enum.RaycastFilterType.Exclude
+			params.FilterDescendantsInstances = { char :: Instance }
+			params.RespectCanCollide = true
+			local hit = workspace:Raycast(cf.Position, off.Unit * (len + 0.4), params)
+			if hit then off = off.Unit * math.max(0, hit.Distance - 0.4) end
+			cam.CFrame = cf + off
+		end
 	end
 end
 

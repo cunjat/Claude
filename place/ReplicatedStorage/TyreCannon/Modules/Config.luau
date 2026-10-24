@@ -433,7 +433,9 @@ Config.Economy = {
 	ComboStep = 0.10,			-- multiplier gained per chained pickup
 	ComboMax = 3.00,
 	ComboWindow = 6.0,			-- seconds to keep a chain alive
-	StartingCredits = 0,
+	-- (2026-10-23: a new yard starts with a little cash, so even a fluffed first run (an over-rev pays ~$300)
+	-- buys the first Cannon level ($348) straight after: the tutorial's SPEND IT never hits NOT YET)
+	StartingCredits = 250,
 	-- server-side sanity limits
 	MaxRunSeconds = 320,
 }
@@ -824,7 +826,8 @@ end
 --==============================================================
 -- BUILD
 --==============================================================
-Config.VersionLabel = "ALPHA 0.2"
+-- (2026-10-23, launch week: "ALPHA" told new players the game was unfinished)
+Config.VersionLabel = "v1.0"
 
 -- the TYRE logo (transparent PNG, 729 x 396)
 Config.Brand = {
@@ -933,8 +936,10 @@ Config.Roller = {
 Config.Run = {
 	SmashKeep = 0.96,         -- forward speed kept rolling through a smashable
 	TurnCost = 0.15,          -- share of speed lost per radian of turning: weaving costs energy
-	FatigueStart = 55,        -- seconds into a run after which the air gets thicker...
-	FatigueRate = 0.035,      -- ...by this share of the drag more every second (no run is endless)
+	-- (2026-10-11: brought in from 55 s / 0.035 when the speed bump stopped killing runs, so runs land
+	-- near Game.Run.TargetSeconds again and the economy's distances hold)
+	FatigueStart = 20,        -- seconds into a run after which the air gets thicker...
+	FatigueRate = 0.2,        -- ...by this share of the drag more every second (no run is endless)
 	Drag0 = 0.05,             -- air drag: decel = s * (Drag0 + s * Drag1)
 	Drag1 = 1 / 9500,
 	TuckDrag = 0.5,           -- drag while tucked (S / Shift / the TUCK button)
@@ -955,6 +960,10 @@ Config.Run = {
 	HillDown = 1.5,           -- on the ground, how much of gravity pulls you down a slope...
 	HillUp = 0.4,             -- ...and how much of it holds you back up one: the gap is what the hills give
 	TakeoffMin = 55,          -- slower than this the tyre hugs the ground over a crest
+	BumpDrop = 4,             -- a takeoff where the ground falls away by more than this in one step is a
+	                          -- speed bump (a kicker's red-and-white lip), not a crest...
+	BumpLoss = 0.33,          -- ...and hitting it untucked costs this share of your speed (tucked: none)
+	                          -- (2026-10-12: a third, at the owner's call; one lip only ever counts once)
 	SoftImpact = 105,         -- landing speed into the slope under this: it just rolls on
 	HardImpact = 230,         -- over this: it kicks back up and the chain breaks
 	BraceSoft = 2.2,          -- tucked as it touches down (braced): this many times the impact still rolls on...
@@ -998,17 +1007,22 @@ Config.Run = {
 --==============================================================
 Config.Store = {
 	Passes = {
-		{ id = "cash2", name = "2x Cash", text = "Every run, crate and auto-cannon shot pays double", passId = 0, robux = 199, icon = "cash" },
-		{ id = "autolaunch", name = "Auto Launch", text = "Launch hands-free: every shift taken for you", passId = 0, robux = 249, icon = "cannon" },
-		{ id = "spares2", name = "+2 Spare Slots", text = "Two more tyres multiply your cash", passId = 0, robux = 149, icon = "rack" },
-		{ id = "lucky", name = "Lucky Crates", text = "Rarer tyres and mutations, every crate", passId = 0, robux = 299, icon = "crates" },
-		{ id = "vip", name = "VIP", text = "+10% cash, a gold name tag and a VIP chat tag", passId = 0, robux = 399, icon = "crest" },
+		{ id = "cash2", name = "2x Cash", text = "Every run and auto-cannon shot pays double", passId = 0, robux = 199, icon = "pass_cash2" },
+		{ id = "autolaunch", name = "Auto Launch", text = "Hands-free launches, and your yard's cannon pays 60% more", passId = 0, robux = 249, icon = "pass_autolaunch" },
+		{ id = "spares2", name = "+2 Spare Slots", text = "Two more tyres multiply your cash", passId = 0, robux = 149, icon = "pass_spares2" },
+		{ id = "lucky", name = "Lucky Crates", text = "Rarer tyres and mutations, every crate", passId = 0, robux = 299, icon = "pass_lucky" },
+		{ id = "vip", name = "VIP", text = "+10% cash, a gold name tag and a VIP chat tag", passId = 0, robux = 399, icon = "pass_vip" },
+		-- the Midnight Garage yard look (Game.YardLooks) and its 8 neon decor pieces (Game.YardDecor `pass`)
+		{ id = "midnight", name = "Midnight Garage", text = "A neon yard look in 3 colourways, plus 8 neon decor pieces", passId = 0, robux = 699, icon = "plot" },
 	},
 	Products = {
-		{ id = "keys5", name = "5 Keys", keys = 5, productId = 0, robux = 49, icon = "key" },
-		{ id = "keys15", name = "15 Keys", keys = 15, productId = 0, robux = 129, icon = "key" },
-		{ id = "keys40", name = "40 Keys", keys = 40, productId = 0, robux = 299, icon = "key" },
-		{ id = "serverluck", name = "Server Luck", text = "30 minutes of double luck for everyone in the server", minutes = 30, productId = 0, robux = 99, icon = "crates" },
+		-- keys open crates, so these are paid random items: hidden where PolicyService restricts them
+		{ id = "keys5", name = "5 Keys", keys = 5, productId = 0, robux = 49, icon = "key", paidRandom = true },
+		{ id = "keys15", name = "15 Keys", keys = 15, productId = 0, robux = 129, icon = "keys_15", paidRandom = true },
+		{ id = "keys40", name = "40 Keys", keys = 40, productId = 0, robux = 299, icon = "keys_40", paidRandom = true },
+		{ id = "serverluck", name = "Server Luck", text = "30 minutes of double luck for everyone in the server", minutes = 30, productId = 0, robux = 99, icon = "serverluck" },
+		-- (v4) one per player: 15 keys and a guaranteed Epic tyre from a crate you've unlocked
+		{ id = "starter", name = "Starter Pack", text = "15 keys and a guaranteed Epic tyre. Once only.", keysPack = 15, productId = 0, robux = 99, icon = "starter", paidRandom = true, once = true },
 	},
 }
 Config.StorePassesById, Config.StoreProductsById, Config.StoreByProductId, Config.StoreByPassId = {}, {}, {}, {}
@@ -1148,28 +1162,32 @@ Config.TitleTiers = {
 Config.TitleTierOrder = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic" }
 
 local M = 1 / Config.Physics.StudsToMetres
+-- the titles (2026-10-12, rebuilt for the current game): Game.titleProgress reads each one's `stat`
+-- from the save; Server/Career unlocks them the moment they're earned and equips them; TitleTags shows
+-- the equipped one over your head and in chat. Live titles belong to whoever holds that board place now.
 Config.Titles = {
-	{ id = "regular",    name = "Backroad Regular", tier = "Common",    cond = { stat = "runs", goal = 25 } },
-	{ id = "hothands",   name = "Hot Hands",        tier = "Common",    cond = { stat = "redlineSeconds", goal = 120 } },
-	{ id = "grease",     name = "Grease Monkey",    tier = "Common",    cond = { stat = "upgrades", goal = 20 } },
-	{ id = "goat",       name = "Goat Whisperer",   tier = "Uncommon",  cond = { stat = "trackBest", track = "backroad", goal = math.ceil(5000 * M) } },
-	{ id = "lane",       name = "Lane Splitter",    tier = "Uncommon",  cond = { stat = "trackBest", track = "highway", goal = math.ceil(5000 * M) } },
-	{ id = "dunerat",    name = "Dune Rat",         tier = "Uncommon",  cond = { stat = "trackBest", track = "dunes", goal = math.ceil(5000 * M) } },
-	{ id = "scrap",      name = "Scrap Collector",  tier = "Uncommon",  cond = { stat = "bronze", goal = 500 } },
-	{ id = "flawless",   name = "Flawless",         tier = "Rare",      cond = { stat = "flawless", goal = 10 } },
-	{ id = "coolhead",   name = "Cool Head",        tier = "Rare",      cond = { stat = "cleanRuns", goal = 10 } },
-	{ id = "wrecking",   name = "Wrecking Ball",    tier = "Rare",      cond = { stat = "smashes", goal = 100 } },
-	{ id = "contractor", name = "Contractor",       tier = "Rare",      cond = { stat = "contracts", goal = 25 } },
-	{ id = "deepend",    name = "The Deep End",     tier = "Epic",      cond = { stat = "maxTier", goal = 7 } },
-	{ id = "hangtime",   name = "Hang Time",        tier = "Epic",      cond = { stat = "longestAir", goal = 12 } },
-	{ id = "crowd",      name = "Crowd Pleaser",    tier = "Epic",      cond = { stat = "bestSpectators", goal = 5 } },
-	{ id = "goldrush",   name = "Gold Rush",        tier = "Epic",      cond = { stat = "gold", goal = 100 } },
-	{ id = "codex",      name = "Codex Complete",   tier = "Legendary", cond = { stat = "codexMax", goal = #Config.Perks } },
-	{ id = "ironcasing", name = "Iron Casing",      tier = "Legendary", cond = { stat = "prestige", goal = 5 } },
-	{ id = "retreader",  name = "Master Retreader", tier = "Legendary", cond = { stat = "forgedLegendary", goal = 1 } },
-	{ id = "record",     name = "Longest on Record", tier = "Mythic",   live = { board = "distance", rank = 3 } },
-	{ id = "spender",    name = "Big Spender",      tier = "Mythic",    live = { board = "robux", rank = 3 } },
-	{ id = "richest",    name = "Richest Here",     tier = "Mythic",    live = { board = "richest", rank = 1 } },
+	{ id = "regular",    name = "Backroad Regular",  tier = "Common",    cond = { stat = "runs", goal = 25 },          desc = "Finish 25 runs" },
+	{ id = "grease",     name = "Grease Monkey",     tier = "Common",    cond = { stat = "upgrades", goal = 30 },      desc = "Buy 30 machine upgrades" },
+	{ id = "hothands",   name = "Hot Hands",         tier = "Common",    cond = { stat = "perfects", goal = 25 },      desc = "Land 25 perfect tucks" },
+	{ id = "goat",       name = "Goat Whisperer",    tier = "Uncommon",  cond = { stat = "best", goal = 2000 },        desc = "Fly 2,000 m in one run" },
+	{ id = "lane",       name = "Lane Splitter",     tier = "Uncommon",  cond = { stat = "zone", zone = "highway", goal = 1 }, desc = "Reach the Highway" },
+	{ id = "dunerat",    name = "Dune Rat",          tier = "Uncommon",  cond = { stat = "zone", zone = "dunes", goal = 1 },   desc = "Reach the Dunes" },
+	{ id = "scrap",      name = "Scrap Collector",   tier = "Uncommon",  cond = { stat = "crates", goal = 25 },        desc = "Open 25 crates" },
+	{ id = "flawless",   name = "Flawless",          tier = "Rare",      cond = { stat = "flawless", goal = 10 },      desc = "Finish 10 flawless runs" },
+	{ id = "coolhead",   name = "Cool Head",         tier = "Rare",      cond = { stat = "cleanRuns", goal = 10 },     desc = "Finish 10 clean runs" },
+	{ id = "wrecking",   name = "Wrecking Ball",     tier = "Rare",      cond = { stat = "smashes", goal = 100 },      desc = "Smash 100 things on the road" },
+	{ id = "collector",  name = "Collector",         tier = "Rare",      cond = { stat = "index", goal = 15 },         desc = "Find 15 different tyres" },
+	{ id = "deepend",    name = "The Deep End",      tier = "Epic",      cond = { stat = "stage", goal = 5 },          desc = "Build up to the Launch Complex" },
+	{ id = "hangtime",   name = "Hang Time",         tier = "Epic",      cond = { stat = "longestAir", goal = 12 },    desc = "Stay in the air 12 s in one run" },
+	{ id = "heat",       name = "Heat Champion",     tier = "Epic",      cond = { stat = "heatWins", goal = 10 },      desc = "Win 10 Heats" },
+	{ id = "crowd",      name = "Crowd Pleaser",     tier = "Epic",      cond = { stat = "bestSpectators", goal = 5 }, desc = "Have 5 players watch one run" },
+	{ id = "ironcasing", name = "Iron Casing",       tier = "Legendary", cond = { stat = "prestige", goal = 5 },       desc = "Reach Prestige 5" },
+	{ id = "myth",       name = "Myth Hunter",       tier = "Legendary", cond = { stat = "rarity", rarity = "Mythic", goal = 1 }, desc = "Pull a Mythic tyre" },
+	{ id = "veteran",    name = "Veteran",           tier = "Legendary", cond = { stat = "level", goal = 50 },         desc = "Reach level 50" },
+	{ id = "secret",     name = "Off the Map",       tier = "Mythic",    cond = { stat = "rarity", rarity = "Secret", goal = 1 }, desc = "Find a Secret tyre" },
+	{ id = "record",     name = "Longest on Record", tier = "Mythic",    live = { board = "distance", rank = 3 },     desc = "Top 3 longest run, while it lasts" },
+	{ id = "spender",    name = "Big Spender",       tier = "Mythic",    live = { board = "robux", rank = 3 },        desc = "Top 3 supporter, while it lasts" },
+	{ id = "richest",    name = "Richest Here",      tier = "Mythic",    live = { board = "richest", rank = 1 },      desc = "Richest in the server, while it lasts" },
 }
 Config.TitlesById = {}
 for _, t in ipairs(Config.Titles) do Config.TitlesById[t.id] = t end
@@ -1182,18 +1200,21 @@ end
 -- into any slot and it replaces the default the next time a character spawns.
 -- Uploads must belong to whoever owns the game (you or the group), and match
 -- the avatar rig type (the current sprint is R6).
+-- (2026-10-23, the owner) Roblox's own walk/run/jump/sit for now; false brings the custom set below back
+-- (2026-10-24, the owner) the owner's new idle / walk / run uploads: the custom set is back on
+Config.UseRobloxAnimations = false
 Config.Animations = {
-	idle = "rbxassetid://110618648268733",
-	idle2 = "rbxassetid://79213512467320",		-- checks his watch
-	walk = "rbxassetid://77529904423883",		-- authored brisk
-	run = "rbxassetid://84956216951852",
-	jump = "rbxassetid://80770955787499",		-- the crouch and lift-off
+	idle = "rbxassetid://77998867839297",		-- (2026-10-24, the owner's uploads: idle, walk, run)
+	idle2 = "rbxassetid://77998867839297",		-- (the old watch check, 79213512467320, didn't match the new idle)
+	walk = "rbxassetid://85424954949535",
+	run = "rbxassetid://73241663791009",
+	jump = "",									-- Roblox's own jump
 	jumpFall = "rbxassetid://116637025732047",	-- coming down after a jump
 	fall = "rbxassetid://137963496054996",		-- dropping without having jumped
 	land = "rbxassetid://135499897151310",
 	victory = "rbxassetid://133750952067894",
 	sadSit = "rbxassetid://79286409560704",
-	sprint = "rbxassetid://84956216951852",
+	sprint = "rbxassetid://73241663791009",
 }
 
 -- Asset layout (ReplicatedStorage.TyreCannon.Assets):
@@ -1267,6 +1288,8 @@ Config.PrefDefaults = {
 	doorPaint = "steel",
 	doorStencil = "none",
 	rigName = "",
+	yardTour = false,	-- the yard-editing tour's been done (Tutorial:tourFrame)
+	tips = "",			-- the one-time tips already shown (Tips), ids separated by commas
 }
 
 --==============================================================
@@ -1323,5 +1346,40 @@ Config.Garage = {
 }
 Config.Garage.StampsById = {}
 for _, s in ipairs(Config.Garage.Stamps) do Config.Garage.StampsById[s.id] = s end
+
+--==============================================================
+-- growth (Server/Growth, GrowthClient): every id 0 or "" means that piece is off until it's made on the
+-- Creator Dashboard. Badges: Engagement > Badges, copy each badge's asset id. 5 badges a day are free.
+--==============================================================
+Config.Growth = {
+	Badges = {
+		welcome = 0,        -- Welcome to the Yard: first join
+		tutorial = 0,       -- Learned the Ropes: finished the tutorial
+		firstLaunch = 0,    -- First Shot: finished a first run
+		highway = 0,        -- Grand Trunk: reached the Highway (4,000 m)
+		dunes = 0,          -- Into the Thar: reached the Dunes (12,000 m)
+		legendary = 0,      -- Legendary Pull: got a Legendary tyre
+		mythic = 0,         -- Mythic Pull: got a Mythic tyre
+		secret = 0,         -- ??? : found a Secret tyre
+		heatWin = 0,        -- Heat Winner: won a Heat
+		stageUp = 0,        -- Moving Up: first yard stage-up
+		topStage = 0,       -- Launch Complex: the top yard stage
+		invited = 0,        -- Road Trip Crew: a friend you invited played
+		prestige = 0,       -- Back to the Dirt Lot: first prestige
+	},
+	GroupId = 0,            -- the game's Roblox group (0 = no group reward or prompt)
+	GroupKeys = 5,          -- keys, once, for being in the group
+	Invite = {
+		FriendKeys = 2,     -- the friend who joins from your invite, on joining
+		InviterKeys = 3,    -- you, once they finish their first run
+		MaxWaiting = 20,    -- invite rewards that can wait for you while you're offline
+	},
+	InviteMessageId = "",   -- optional: an invite string from Engagement > Notifications (must contain {experienceName})
+	Notify = {
+		-- Engagement > Notifications strings; also needs Roblox's OpenCloud package in ServerScriptService
+		DailyMessageId = "",    -- e.g. "Day {day} of your daily reward is waiting in {experienceName}!"
+		StashMessageId = "",    -- e.g. "Your auto-cannon's 4-hour stash is full. Come cash it in!"
+	},
+}
 
 return Config

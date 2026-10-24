@@ -6,7 +6,7 @@
 --   below the green      EARLY        into the red / the limiter  OVER-REV
 -- Each gear climbs faster than the last. The three shifts grade the launch:
 --   all three perfect PERFECT, 4-5 points GREAT, 2-3 GOOD, less WEAK   (perfect 2, good 1)
---   LaunchTap.run(gui, auto, onShift) -> grade, ratings
+--   LaunchTap.run(gui, auto, onShift, slow?) -> grade, ratings
 --   onShift(gear, rating) fires on every shift, so the cutscene can build with the launch
 -- Grades and what they pay (Main): LaunchTap.Grades[grade] = { push, show, nitro }
 
@@ -22,7 +22,10 @@ local LaunchTap = {}
 
 -- the zones in segments (art/ui/hud_gauges.py PERFECT, GOOD, OVER), a little forgiveness on PERFECT
 local N = Gauge.N
-local GOOD_FROM, PERF_FROM, PERF_TO, GOOD_TO = 21 / N, 23.7 / N, 26.3 / N, 27 / N
+-- (2026-10-24) matched to the painted segments: segment i lights as the revs pass (i - 1) / N, so the
+-- gold pair (24, 25) is lit from 23 / N to 25 / N and the green (21-26) from 20 / N to 26 / N. The
+-- scored zone used to sit a segment higher: a press on the first gold scored GOOD.
+local GOOD_FROM, PERF_FROM, PERF_TO, GOOD_TO = 20 / N, 22.7 / N, 25.3 / N, 26 / N
 local GEAR_TIME = { 1.3, 1.08, 0.9 }		-- seconds from the drop to the limiter
 local DROP = 0.18							-- where the revs fall to after a shift
 
@@ -93,7 +96,8 @@ local function revBar(parent: Instance, width: number)
 	return bar
 end
 
-function LaunchTap.run(gui: ScreenGui, auto: boolean?, onShift: ((number, string) -> ())?): (string, { string })
+-- `slow` stretches every gear (the tutorial's first launch runs at 1.6, so the gold is easy to hit)
+function LaunchTap.run(gui: ScreenGui, auto: boolean?, onShift: ((number, string) -> ())?, slow: number?): (string, { string })
 	local W = 520
 	local root = UI.mk("Frame", {
 		Name = "LaunchTap", AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, -16),
@@ -150,7 +154,7 @@ function LaunchTap.run(gui: ScreenGui, auto: boolean?, onShift: ((number, string
 		Kit.pop(gearText, 1.25, 0.2)
 		tapped = false
 		local t = 0
-		local T = GEAR_TIME[gear]
+		local T = GEAR_TIME[gear] * (slow or 1)
 		-- the auto launcher shifts somewhere in the zone, now and then perfectly
 		local autoAt = auto and (math.random() < 0.45 and (PERF_FROM + PERF_TO) / 2 or GOOD_FROM + math.random() * (PERF_FROM - GOOD_FROM)) or nil
 		local limiter = nil :: number?

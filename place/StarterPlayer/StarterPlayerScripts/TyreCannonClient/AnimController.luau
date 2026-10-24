@@ -18,13 +18,17 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Root = ReplicatedStorage:WaitForChild("TyreCannon")
 local Config = require(Root:WaitForChild("Modules"):WaitForChild("Config"))
 local Prefs = require(script.Parent.Prefs)
+local AnimIds = require(script.Parent.AnimIds)
 local Assets = Root:WaitForChild("Assets")
 
 local AnimController = {}
 AnimController.__index = AnimController
 
-local WALK_REF = 20			-- studs/s the walk looks right at
-local RUN_REF = 36			-- and the run
+local WALK_REF = 22			-- studs/s the walk looks right at (Movement's walk speed)
+local RUN_REF = 38			-- and the run (Movement's sprint)
+local LEAN_TURN = 0.075		-- radians of lean per radian a second of turning
+local LEAN_MAX = 0.2
+local PackFX = require(script.Parent.PackFX)
 local FADE = 0.2
 local P = Enum.AnimationPriority
 
@@ -60,31 +64,61 @@ function AnimController:bind(char: Model)
 	self.loco, self.air = nil, nil
 	local hum = char:WaitForChild("Humanoid", 10) :: Humanoid?
 	if not hum then return end
+	-- (2026-10-23, the owner: "we'll just use base roblox animations for now") Config.UseRobloxAnimations
+	-- keeps Roblox's own Animate script for walking, running, jumping and sitting; this only plays the
+	-- extras (the victory dance, the sad sit)
+	self.roblox = Config.UseRobloxAnimations == true
 	local animate = char:FindFirstChild("Animate")
-	if animate then animate:Destroy() end
+	if animate and not self.roblox then animate:Destroy() end
 	local animator = hum:FindFirstChildOfClass("Animator") or hum:WaitForChild("Animator", 5)
 	if not animator then return end
-	for _, t in ipairs((animator :: Animator):GetPlayingAnimationTracks()) do t:Stop(0) end
+	if not self.roblox then
+		for _, t in ipairs((animator :: Animator):GetPlayingAnimationTracks()) do t:Stop(0) end
+	end
 	self.hum = hum
 	self.char = char
 	self.animator = animator
 	self.dances = {}
 	self.dance = nil
 	self.root = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+	-- the joint the whole body hangs off (R6 RootJoint, R15 Root), for leaning into turns
+	local joint = (self.root and self.root:FindFirstChild("RootJoint")) or char:FindFirstChild("Root", true)
+	if joint and joint:IsA("Motor6D") then
+		self.joint = joint
+		self.jointC0 = joint.C0
+	else
+		self.joint, self.jointC0 = nil, nil
+	end
+	self.lean = Vector2.zero
+	self.lastLook = nil
+	self.lastSpeed = 0
+	self.groundOn = false
+	self.dustAt = 0
 
-	local A = Config.Animations
+	-- AnimIds swaps in Roblox's R6 defaults for any upload this game isn't allowed to play
+	self.nextIdle2 = os.clock() + math.random(8, 14)
+	AnimIds.wait()
+	if self.char ~= char then return end
+	local A = AnimIds.get
 	local an = animator :: Animator
+	if self.roblox then
+		self.tracks = {
+			victory = load(an, A("victory"), P.Action2, false),
+			sadSit = load(an, A("sadSit"), P.Action4, true),
+		}
+		return
+	end
 	self.tracks = {
-		idle = load(an, A.idle, P.Idle, true),
-		idle2 = load(an, A.idle2, P.Idle, false),
-		walk = load(an, A.walk, P.Movement, true),
-		run = load(an, A.run, P.Movement, true),
-		jump = load(an, A.jump, P.Action, false),
-		jumpFall = load(an, A.jumpFall, P.Action, true),
-		fall = load(an, A.fall, P.Action, true),
-		land = load(an, A.land, P.Action, false),
-		victory = load(an, A.victory, P.Action2, false),
-		sadSit = load(an, A.sadSit, P.Action4, true),
+		idle = load(an, A("idle"), P.Idle, true),
+		idle2 = load(an, A("idle2"), P.Idle, false),
+		walk = load(an, A("walk"), P.Movement, true),
+		run = load(an, A("run"), P.Movement, true),
+		jump = load(an, A("jump"), P.Action, false),
+		jumpFall = load(an, A("jumpFall"), P.Action, true),
+		fall = load(an, A("fall"), P.Action, true),
+		land = load(an, A("land"), P.Action, false),
+		victory = load(an, A("victory"), P.Action2, false),
+		sadSit = load(an, A("sadSit"), P.Action4, true),
 	}
 	self.nextIdle2 = os.clock() + math.random(8, 14)
 	self.jumped = false
@@ -93,6 +127,15 @@ end
 
 function AnimController:setLoco(name: string?, speed: number?)
 	local t = self.tracks
+	if name == nil and self.groundOn then
+		-- leaving the ground (or switched off): the blended idle, walk and run all fade out
+		for _, k in ipairs({ "idle", "walk", "run" }) do
+			if t[k] then t[k]:Stop(0.15) end
+		end
+		self.groundOn = false
+		self.loco = nil
+		return
+	end
 	if self.loco ~= name then
 		if self.loco and t[self.loco] then t[self.loco]:Stop(FADE) end
 		self.loco = name
@@ -124,6 +167,11 @@ function AnimController:onState(state: Enum.HumanoidStateType)
 		self.jumped = false
 		local land = self.tracks.land
 		if land then land:Play(0.05) end
+		if (self.fallSpeed or 0) > 45 and self.root then
+			pcall(function()
+				PackFX.burst("dustRing", CFrame.new(self.root.Position - Vector3.new(0, 2.8, 0)), 3, Color3.fromRGB(214, 206, 190), 0.32)
+			end)
+		end
 	elseif state == S.Running or state == S.RunningNoPhysics then
 		self:setAir(nil)
 		self.jumped = false
@@ -132,13 +180,24 @@ end
 
 function AnimController:step(_dt: number)
 	local hum, root = self.hum, self.root
+	if self.roblox then return end
 	if not (hum and root and hum.Parent) or self.sitting or not self.enabled then return end
+	-- (2026-10-24) sat on a bench: the idle/walk/run blend stops, so BenchPose's sitting pose is the
+	-- only thing on the body (the idle's arms and legs showed through it)
+	if hum.Sit then
+		self:setLoco(nil)
+		self:setAir(nil)
+		self:leanTo(0, 0, _dt)
+		return
+	end
 	local state = hum:GetState()
 	local S = Enum.HumanoidStateType
 	if state == S.Freefall or state == S.Jumping then
+		self.fallSpeed = math.max(0, -root.AssemblyLinearVelocity.Y)
 		if self.jumped and self.air == "jump" and root.AssemblyLinearVelocity.Y < -2 then
 			self:setAir("jumpFall")
 		end
+		self:leanTo(0, 0, _dt)
 		return
 	end
 	if self.victoryPlaying then
@@ -152,18 +211,63 @@ function AnimController:step(_dt: number)
 	end
 	local v = root.AssemblyLinearVelocity
 	local speed = Vector3.new(v.X, 0, v.Z).Magnitude
-	if speed < 0.8 then
-		self:setLoco("idle", 1)
-		if os.clock() > self.nextIdle2 then
-			self.nextIdle2 = os.clock() + math.random(10, 18)
-			local i2 = self.tracks.idle2
-			if i2 then i2:Play(0.3) end
-		end
-	elseif (self.movement and self.movement.sprinting) or hum.WalkSpeed >= 30 then
-		self:setLoco("run", math.clamp(speed / RUN_REF, 0.6, 1.4))
-	else
-		self:setLoco("walk", math.clamp(speed / WALK_REF, 0.5, 1.3))
+	local t = self.tracks
+	-- something else (a dance, the chair) stopped the ground set: start it again
+	if self.groundOn and t.idle and not t.idle.IsPlaying then self.groundOn = false end
+	if not self.groundOn then
+		self.groundOn = true
+		self.loco = "ground"
+		if t.idle then t.idle:Play(0.2, 1) end
+		if t.walk then t.walk:Play(0.2, 0.01) end
+		if t.run then t.run:Play(0.2, 0.01) end
 	end
+	-- how much you're moving, and how far from a walk to a run
+	local move = math.clamp((speed - 0.6) / 5, 0, 1)
+	local runK = math.clamp((speed - WALK_REF * 0.9) / (RUN_REF * 0.95 - WALK_REF * 0.9), 0, 1)
+	runK = runK * runK * (3 - 2 * runK)
+	if t.idle then t.idle:AdjustWeight(math.max(0.01, 1 - move), 0.12) end
+	if t.walk then
+		t.walk:AdjustWeight(math.max(0.01, move * (1 - runK)), 0.12)
+		t.walk:AdjustSpeed(math.clamp(speed / WALK_REF, 0.45, 1.5))
+	end
+	if t.run then
+		t.run:AdjustWeight(math.max(0.01, move * runK), 0.12)
+		t.run:AdjustSpeed(math.clamp(speed / RUN_REF, 0.6, 1.4))
+	end
+	if move < 0.05 and os.clock() > self.nextIdle2 then
+		self.nextIdle2 = os.clock() + math.random(10, 18)
+		local i2 = t.idle2
+		if i2 then i2:Play(0.3) end
+	end
+	-- lean into turns, a touch forward when speeding up, back when braking
+	local look = root.CFrame.LookVector
+	local yawRate = 0
+	if self.lastLook and _dt > 0 then
+		local a = math.atan2(-look.X, -look.Z) - math.atan2(-self.lastLook.X, -self.lastLook.Z)
+		if a > math.pi then a -= 2 * math.pi elseif a < -math.pi then a += 2 * math.pi end
+		yawRate = a / _dt
+	end
+	self.lastLook = look
+	local accel = if _dt > 0 then (speed - self.lastSpeed) / _dt else 0
+	self.lastSpeed = speed
+	local roll = math.clamp(yawRate * LEAN_TURN, -LEAN_MAX, LEAN_MAX) * move * (0.5 + 0.5 * runK)
+	local pitch = math.clamp(accel * 0.004, -0.1, 0.12) + 0.05 * runK * move
+	self:leanTo(pitch, roll, _dt)
+	-- a puff of dust off the heels while sprinting
+	if runK > 0.7 and speed > 30 and os.clock() > self.dustAt then
+		self.dustAt = os.clock() + 0.3
+		pcall(function()
+			PackFX.burst("dustPuff", CFrame.new(root.Position - Vector3.new(0, 2.8, 0) - look * 1.2), 1, Color3.fromRGB(214, 206, 190), 0.28)
+		end)
+	end
+end
+
+-- eases the body's lean toward (pitch forward, roll into the turn)
+function AnimController:leanTo(pitch: number, roll: number, dt: number)
+	if not (self.joint and self.jointC0) then return end
+	local k = math.min(1, dt * 8)
+	self.lean = self.lean:Lerp(Vector2.new(pitch, roll), k)
+	self.joint.C0 = CFrame.Angles(-self.lean.X, 0, self.lean.Y) * self.jointC0
 end
 
 function AnimController:setEnabled(on: boolean)
@@ -171,6 +275,8 @@ function AnimController:setEnabled(on: boolean)
 	if not on then
 		self:setLoco(nil)
 		self:setAir(nil)
+		if self.joint and self.jointC0 then self.joint.C0 = self.jointC0 end
+		self.lean = Vector2.zero
 	end
 end
 
@@ -279,18 +385,21 @@ function AnimController.idleNPC(model: Model)
 	local hum = model:FindFirstChildOfClass("Humanoid")
 	local animator = hum and (hum:FindFirstChildOfClass("Animator") or Instance.new("Animator", hum))
 	if not animator then return end
-	local idle = load(animator :: Animator, Config.Animations.idle, P.Idle, true)
-	local idle2 = load(animator :: Animator, Config.Animations.idle2, P.Idle, false)
-	if idle then idle:Play(0.3) end
-	if idle2 then
-		task.spawn(function()
+	-- in its own thread: AnimIds may still be checking which uploads this game can play
+	task.spawn(function()
+		AnimIds.wait()
+		if not model.Parent then return end
+		local idle = load(animator :: Animator, AnimIds.get("idle"), P.Idle, true)
+		local idle2 = load(animator :: Animator, AnimIds.get("idle2"), P.Idle, false)
+		if idle then idle:Play(0.3) end
+		if idle2 then
 			task.wait(math.random() * 10)
 			while model.Parent do
 				task.wait(math.random(9, 16))
 				if model.Parent then idle2:Play(0.3) end
 			end
-		end)
-	end
+		end
+	end)
 end
 
 return AnimController

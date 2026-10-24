@@ -77,10 +77,8 @@ local function keyOf(model: Model): string
 end
 
 local function sample(model: Model, radius: number, zMax: number): { number }?
-	local copy: Model? = nil
 	local ok, res = pcall(function()
-		copy = model:Clone()
-		local copy = copy :: Model
+		local copy = model:Clone()
 		for _, c in ipairs(copy:GetChildren()) do
 			if c.Name == "Sticker" then c:Destroy() end
 		end
@@ -117,10 +115,9 @@ local function sample(model: Model, radius: number, zMax: number): { number }?
 			end
 			out[i + 1] = if best then best / radius else -1
 		end
+		copy:Destroy()
 		return out
 	end)
-	-- (gone whatever happened in there)
-	if copy then (copy :: Model):Destroy() end
 	if not ok or type(res) ~= "table" then return nil end
 	return res
 end

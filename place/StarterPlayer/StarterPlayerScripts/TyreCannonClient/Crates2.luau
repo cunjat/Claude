@@ -1,18 +1,23 @@
 --!strict
--- TYRE CANNON :: Crates2 (v3)
--- The crate screen, laid out like a summon banner:
---   left     a tab a crate (Backroad, Highway, Dunes): its picture, its name, what it costs; a crate
---            you haven't reached is veiled and says how far it is
---   centre   the banner: the crate big on a coloured stage with slow rays, the featured Legendary in
---            a bay (x3 in every crate) with the clock to the next banner, Test Drive (one free run a
---            banner), the pity bar, and four buttons: cash x1, cash x3, key x1 (luckier, counts to
---            the pity), key x3
---   right    the drop rates for that crate, cash and key side by side
--- Opening: one or three display bays behind roller shutters, opened one after another: the
--- shutter rattles (harder the rarer), rolls up, the bay floods with the rarity's colour and the
--- tyre drops in; its name, rarity and multiplier come up, and a mutation's badge if it rolled one.
--- Open Again (the same way, the same count) or Done.
---   Crates2.new(gui, remotes) -> crates ; crates:setProfile(p) ; crates:open()
+-- TYRE CANNON :: Crates2 (v4, after the gacha research in docs/CRATE_RESEARCH.md)
+-- The crate screen is the banner:
+--   top      a tab a crate (Backroad, Highway, Dunes): its picture, its name, its price; one you
+--            haven't reached is locked and says how far it is. Your keys on the right.
+--   banner   the crate big on a stage lit in its zone's colour, its own tyres circling slowly behind
+--            it, its name and the clock to the next banner; the featured Legendary on a big gold card
+--            with Test Drive (one free run a banner)
+--   bottom   the pity (always on: Legendary guaranteed in N, counted apart for cash and key crates),
+--            pay with cash or keys, DROP RATES (every outcome and its chance, in a popup: shown
+--            before you buy, as Roblox's paid-random-items rules ask), and two big buttons, OPEN 1
+--            and OPEN 10 (one of the ten is always Rare or better), the price on each
+-- The opening (full screen): the crate slams down and rattles harder and harder, glowing white;
+-- it bursts in a flash and a shockwave, and only then does the light take the colour of the best
+-- thing in it (the tell comes late, so the suspense holds); a Legendary or better gets a slow-
+-- motion hold, a gold wash and its own banner first. One crate: its card flies in big. Ten: ten
+-- face-down cards are dealt into a grid and flip over one after another, rarest last, a rare one
+-- with a pause and a flash. SKIP turns them all at once; a tap hurries it. Then: OPEN AGAIN (the
+-- same way), AUTO (keeps opening while you can pay), DONE.
+--   Crates2.new(gui, remotes) -> crates ; crates:setProfile(p) ; crates:open() ; crates.stage
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -22,12 +27,17 @@ local UI = require(script.Parent.UI)
 local Kit = require(script.Parent.Kit)
 local TyreLook = require(script.Parent.TyreLook)
 local TyreShow = require(script.Parent.TyreShow)
+local Sound = require(script.Parent.Sound)
 local C = Kit.C
 
 local Crates2 = {}
 Crates2.__index = Crates2
 
--- a spinning tyre in a viewport
+local W, H = 1160, 660            -- the screen's card
+local SW, SH = 1116, 470           -- the banner stage inside it
+local CX, CY = 330, 200            -- the crate's middle on the stage
+
+-- a spinning tyre in a viewport (for a tyre without a studio picture yet)
 function Crates2.tyreViewport(parent: Instance, size: UDim2, tyreId: string?): (ViewportFrame, () -> ())
 	local vp = UI.mk("ViewportFrame", { Size = size, BackgroundTransparency = 1, Ambient = Color3.fromRGB(170, 170, 180), LightColor = Color3.new(1, 1, 1), LightDirection = Vector3.new(-1, -1, -1), Parent = parent })
 	local world = Instance.new("WorldModel")
@@ -59,32 +69,56 @@ local function pct(x: number): string
 	return ("%.2f%%"):format(p)
 end
 
--- each crate's look: its colour, its picture (a Blender render per crate) and a line about it
-local ZONE_LOOK = {
-	backroad = { color = Color3.fromRGB(150, 205, 60), icon = Kit.Icon.crate_backroad or Kit.Icon.crate, sub = "The everyday crate. Plain tyres, and a Legendary if you're lucky." },
-	highway = { color = Color3.fromRGB(255, 128, 40), icon = Kit.Icon.crate_highway or Kit.Icon.crate, sub = "Every tyre in it pays x2 a Backroad one: even a Common beats a Backroad Rare." },
-	dunes = { color = Color3.fromRGB(176, 112, 240), icon = Kit.Icon.crate_dunes or Kit.Icon.crate, sub = "Every tyre in it pays x4 a Backroad one: even a Common beats a Backroad Epic." },
-}
-
 local function clock(sec: number): string
 	sec = math.max(0, math.floor(sec))
 	return ("%d:%02d:%02d"):format(sec // 3600, (sec % 3600) // 60, sec % 60)
 end
 
+-- each crate's look: its colour, its tab picture (plain) and its hero picture (with its light)
+-- what a locked crate's contents are drawn in: a near-black silhouette
+local SHADOW = Color3.fromRGB(16, 16, 22)
+
+local ZONE_LOOK = {
+	backroad = { color = Color3.fromRGB(150, 205, 60), icon = Kit.Icon.crate_backroad, big = (Kit.Icon :: any).crateBig_backroad },
+	highway = { color = Color3.fromRGB(255, 128, 40), icon = Kit.Icon.crate_highway, big = (Kit.Icon :: any).crateBig_highway },
+	dunes = { color = Color3.fromRGB(176, 112, 240), icon = Kit.Icon.crate_dunes, big = (Kit.Icon :: any).crateBig_dunes },
+}
+
+-- a tyre's picture in a box (its studio render, or a turning model when it has none yet)
+local function tyrePic(parent: Instance, id: string, size: number, pos: UDim2, z: number): GuiObject
+	local g = TyreShow.thumb(parent, id, true, UDim2.fromOffset(size, size), pos)
+	g.ZIndex = z
+	return g
+end
+
+local function text(t: string, size: number, color: Color3, stroke: number, parent: Instance, pos: UDim2, box: UDim2, z: number, anchor: Vector2?, font: Font?): TextLabel
+	local l = Kit.text(t, size, color, stroke, font)
+	l.AnchorPoint = anchor or Vector2.new(0, 0)
+	l.Position = pos
+	l.Size = box
+	Kit.fit(l, size, 8)
+	l.ZIndex = z
+	l.Parent = parent
+	return l
+end
+
+--==============================================================
+-- the screen
+--==============================================================
 function Crates2.new(gui: ScreenGui, remotes: Instance)
 	local self = setmetatable({}, Crates2)
 	self.gui = gui
 	self.R = remotes
-	self.stops = {}
-	self.count = 1
 	self.zone = "backroad"
+	self.pay = "cash"
+	self.auto = false
 	local root = UI.mk("Frame", {
-		Name = "Crates2", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.52), Size = UDim2.fromOffset(1000, 620),
+		Name = "Crates2", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.52), Size = UDim2.fromOffset(W, H),
 		BackgroundTransparency = 1, Visible = false, ZIndex = 30, Parent = gui,
 	})
 	UI.autoScale(root, 1280, 760)
 	self.root = root
-	local holder, face = Kit.card(UDim2.fromOffset(1000, 604), C.cream, 22, 9)
+	local holder, face = Kit.card(UDim2.fromOffset(W, H - 16), C.cream, 22, 9)
 	holder.Parent = root
 	Kit.header(face, "Crates", C.purple, 56)
 	local close = Kit.close(52)
@@ -93,244 +127,195 @@ function Crates2.new(gui: ScreenGui, remotes: Instance)
 	close.root.ZIndex = 40
 	close.root.Parent = root
 	close.onClick = function() self:close() end
-	-- the top line, level with the title: the banner's clock, then your keys (a smaller counter,
-	-- its middle on the panel's top edge like the title's)
-	local keyChip, keyText = Kit.chip(Kit.Icon.key, nil, 112)
+	-- your keys, top right
+	local keyChip, keyText = Kit.chip(Kit.Icon.key, nil, 120)
 	keyChip.AnchorPoint = Vector2.new(1, 0.5)
-	keyChip.Position = UDim2.new(1, -62, 0, 8)
+	keyChip.Position = UDim2.new(1, -66, 0, 8)
 	keyChip.ZIndex = 9
 	keyChip.Parent = face
-	UI.mk("UIScale", { Scale = 0.82, Parent = keyChip })
 	for _, d in ipairs(keyChip:GetDescendants()) do
 		if d:IsA("GuiObject") then d.ZIndex = math.max(d.ZIndex, 9) end
 	end
-	local keyIcon = keyChip:FindFirstChild("Icon") :: ImageLabel?
-	if keyIcon then
-		-- the key sits inside the counter's left end instead of hanging off it
-		keyIcon.Position = UDim2.new(0, 22, 0.5, 0)
-		keyIcon.Size = UDim2.fromOffset(40, 40)
-	end
 	self.keysText = keyText
-	self.bannerClock = Kit.text("", 15, C.text, 2, Kit.Body)
-	self.bannerClock.AnchorPoint = Vector2.new(1, 0.5)
-	self.bannerClock.TextXAlignment = Enum.TextXAlignment.Right
-	self.bannerClock.Position = UDim2.new(1, -170, 0, 8)
-	self.bannerClock.Size = UDim2.fromOffset(440, 20)
-	Kit.fit(self.bannerClock, 15, 10)
-	self.bannerClock.ZIndex = 9
-	self.bannerClock.Parent = face
 
 	---------------------------------------------------------------
-	-- the banner tabs down the left: one a crate, its picture, its name, what it costs
+	-- the tabs: a strip of crates along the top
 	---------------------------------------------------------------
 	self.tabs = {}
 	for i, z in ipairs(Game.Zones) do
 		local look = ZONE_LOOK[z.id]
 		local b = UI.mk("TextButton", {
-			Name = z.id, Position = UDim2.fromOffset(22, 54 + (i - 1) * 180), Size = UDim2.fromOffset(212, 168),
+			Name = z.id, Position = UDim2.fromOffset(22 + (i - 1) * 262, 56), Size = UDim2.fromOffset(250, 70),
 			BackgroundTransparency = 1, Text = "", AutoButtonColor = false, ZIndex = 5, Parent = face,
 		})
 		local inner = UI.mk("Frame", { Name = "Inner", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 5, Parent = b })
-		local frame = Kit.slice("tile", look.color, inner, 5, 0.42)
-		UI.mk("ImageLabel", {
-			Name = "Glow", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.42), Size = UDim2.fromOffset(150, 130),
-			BackgroundTransparency = 1, Image = Kit.Art.glow, ImageColor3 = look.color, ImageTransparency = 0.45, ZIndex = 6, Parent = inner,
-		})
+		local frame = Kit.slice("tile", look.color, inner, 5, 0.3)
 		local pic = UI.mk("ImageLabel", {
-			Name = "Crate", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.37), Size = UDim2.fromOffset(96, 96),
+			Name = "Crate", AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(40, 35), Size = UDim2.fromOffset(66, 66),
 			BackgroundTransparency = 1, Image = look.icon, ZIndex = 8, Parent = inner,
 		})
-		local name = Kit.text(string.upper(z.name), 20, C.white, 2.5)
-		name.AnchorPoint = Vector2.new(0.5, 1)
-		name.Position = UDim2.new(0.5, 0, 1, -30)
-		name.Size = UDim2.fromOffset(190, 24)
-		Kit.fit(name, 20, 11)
-		name.ZIndex = 13
-		name.Parent = inner
-		local status = Kit.text("", 14, C.gold, 2, Kit.Body)
-		status.AnchorPoint = Vector2.new(0.5, 1)
-		status.Position = UDim2.new(0.5, 0, 1, -10)
-		status.Size = UDim2.fromOffset(190, 18)
-		-- (above the veil: on a locked crate this is what says how far it is)
-		status.ZIndex = 13
-		status.Parent = inner
-		local veil = UI.mk("Frame", {
-			Name = "Veil", Position = UDim2.fromOffset(8, 8), Size = UDim2.new(1, -16, 1, -16), BackgroundColor3 = Color3.fromRGB(8, 8, 12),
-			BackgroundTransparency = 0.35, BorderSizePixel = 0, ZIndex = 11, Visible = false, Parent = inner,
-		}, { UI.corner(10) })
-		UI.mk("ImageLabel", {
-			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.4), Size = UDim2.fromOffset(60, 60), BackgroundTransparency = 1,
-			Image = Kit.Icon.lock, ZIndex = 12, Parent = veil,
+		local name = text(string.upper(z.name), 20, C.white, 2.5, inner, UDim2.fromOffset(78, 12), UDim2.fromOffset(160, 24), 9)
+		name.TextXAlignment = Enum.TextXAlignment.Left
+		local status = text("", 14, C.gold, 2, inner, UDim2.fromOffset(78, 38), UDim2.fromOffset(160, 18), 9, nil, Kit.Body)
+		status.TextXAlignment = Enum.TextXAlignment.Left
+		local lock = UI.mk("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(40, 35), Size = UDim2.fromOffset(36, 36), BackgroundTransparency = 1,
+			Image = Kit.Icon.lock, ZIndex = 10, Visible = false, Parent = inner,
 		})
-		local sweep = Kit.shine(frame, 10)
 		b.MouseEnter:Connect(function()
-			if self.zone ~= z.id then Kit.tween(inner, 0.14, { Position = UDim2.fromOffset(5, 0) }, Enum.EasingStyle.Back) end
-			sweep()
+			if self.zone ~= z.id then Kit.tween(inner, 0.14, { Position = UDim2.fromOffset(0, -4) }, Enum.EasingStyle.Back) end
 		end)
 		b.MouseLeave:Connect(function()
-			Kit.tween(inner, 0.14, { Position = UDim2.fromOffset(self.zone == z.id and 6 or 0, 0) })
+			Kit.tween(inner, 0.14, { Position = UDim2.fromOffset(0, if self.zone == z.id then -6 else 0) })
 		end)
 		b.Activated:Connect(function() self:selectZone(z.id) end)
-		self.tabs[z.id] = { button = b, inner = inner, frame = frame, status = status, veil = veil, crate = pic }
+		self.tabs[z.id] = { button = b, inner = inner, frame = frame, status = status, lock = lock, crate = pic, name = name }
 	end
 
 	---------------------------------------------------------------
-	-- the banner: the crate on a coloured stage with this crate's tyres drifting round it, its
-	-- name, the featured tyre, and under it one switch (pay with cash or keys) and two buttons
+	-- the banner
 	---------------------------------------------------------------
-	local banner = UI.mk("Frame", { Position = UDim2.fromOffset(250, 54), Size = UDim2.fromOffset(500, 528), BackgroundTransparency = 1, ZIndex = 4, Parent = face })
-	self.bannerRing = Kit.slice("panel_ring", C.purple, banner, 6, 0.4)
+	local banner = UI.mk("Frame", { Position = UDim2.fromOffset(22, 136), Size = UDim2.fromOffset(SW, SH + 16), BackgroundTransparency = 1, ZIndex = 4, Parent = face })
+	self.bannerRing = Kit.slice("panel_ring", C.purple, banner, 5, 0.4)
 	local stage = UI.mk("Frame", {
-		Position = UDim2.fromOffset(8, 8), Size = UDim2.new(1, -16, 1, -16), BackgroundColor3 = Color3.fromRGB(20, 20, 24), ClipsDescendants = true,
+		Position = UDim2.fromOffset(8, 8), Size = UDim2.fromOffset(SW - 16, SH), BackgroundColor3 = Color3.new(1, 1, 1), ClipsDescendants = true,
 		ZIndex = 5, Parent = banner,
 	}, { UI.corner(10) })
-	self.stage2 = stage
+	self.stageGrad = UI.mk("UIGradient", { Rotation = 90, Parent = stage })
 	self.stageGlow = UI.mk("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(170, 206), Size = UDim2.fromScale(1.1, 1.0), BackgroundTransparency = 1,
-		Image = Kit.Art.glow, ImageColor3 = C.purple, ImageTransparency = 0.35, ZIndex = 5, Parent = stage,
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(CX, CY), Size = UDim2.fromOffset(560, 560), BackgroundTransparency = 1,
+		Image = Kit.Art.radial, ImageTransparency = 0.25, ZIndex = 5, Parent = stage,
 	})
-	-- the crate's own tyres, faint, drifting slowly round behind it, each turning (fillDrift)
-	self.drift = UI.mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 5, Parent = stage })
-	self.driftItems = {}
-	self.bannerTitle = Kit.text("", 34, C.white, 3)
-	self.bannerTitle.Position = UDim2.fromOffset(0, 14)
-	self.bannerTitle.Size = UDim2.new(1, 0, 0, 40)
-	Kit.fit(self.bannerTitle, 34, 18)
-	self.bannerTitle.ZIndex = 8
-	self.bannerTitle.Parent = stage
-	self.bannerSub = Kit.text("", 15, C.muted, 1.5, Kit.Body)
-	self.bannerSub.Position = UDim2.fromOffset(16, 54)
-	self.bannerSub.Size = UDim2.new(1, -32, 0, 30)
-	self.bannerSub.TextWrapped = true
-	Kit.fit(self.bannerSub, 14, 11)
-	self.bannerSub.ZIndex = 8
-	self.bannerSub.Parent = stage
+	self.carousel = UI.mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 6, Parent = stage })
+	self.carouselItems = {}
+	self.bannerTitle = text("", 36, C.white, 3, stage, UDim2.fromOffset(24, 14), UDim2.fromOffset(520, 42), 12)
+	self.bannerTitle.TextXAlignment = Enum.TextXAlignment.Left
+	self.bannerClock = text("", 15, C.white, 1.5, stage, UDim2.fromOffset(26, 56), UDim2.fromOffset(400, 18), 12, nil, Kit.Body)
+	self.bannerClock.TextXAlignment = Enum.TextXAlignment.Left
 	self.bigCrate = UI.mk("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0, 170, 0, 206), Size = UDim2.fromOffset(210, 210), BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(CX, CY + 10), Size = UDim2.fromOffset(320, 320), BackgroundTransparency = 1,
 		ScaleType = Enum.ScaleType.Fit, ZIndex = 9, Parent = stage,
 	})
-	self.stopBob = Kit.bob(self.bigCrate, 6, 1.6)
-	-- the featured Legendary: a card on the right, its tag on top, its Test Drive along its foot
-	local feat = UI.mk("Frame", { Position = UDim2.new(1, -164, 0, 104), Size = UDim2.fromOffset(148, 206), BackgroundTransparency = 1, ZIndex = 8, Parent = stage })
-	Kit.slot(feat, Game.RaritiesById.Legendary.color, 8)
+	Kit.bob(self.bigCrate, 5, 1.8)
+	-- (2026-10-24, the owner: "the fog shouldn't just be there, the actual crates and tyres should be
+	-- darkened so you DON'T know what's in there until you've unlocked it") a crate you haven't
+	-- reached: the stage as it is, but the crate, its tyres and its Legendary are black silhouettes
+	-- (Crates2:shade), the names hidden; a padlock and how far it is under the crate
+	local veil = UI.mk("Frame", { Name = "Locked", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1,
+		Visible = false, ZIndex = 30, Parent = stage })
+	local padlock = UI.mk("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(CX, CY + 20), Size = UDim2.fromOffset(92, 92),
+		BackgroundTransparency = 1, Image = Kit.Icon.lock, ZIndex = 33, Parent = veil,
+	})
+	self.lockQ = padlock
+	self.lockText = text("", 22, C.white, 2.5, veil, UDim2.fromOffset(CX - 250, CY + 110), UDim2.fromOffset(500, 28), 33)
+	self.lockVeil = veil
+	game:GetService("RunService").RenderStepped:Connect(function()
+		if not veil.Visible or not self.root.Visible then return end
+		padlock.Rotation = math.sin(os.clock() * 1.3) * 5
+	end)
+	-- the featured Legendary: a big gold card, Test Drive under it
+	local gold = Game.RaritiesById.Legendary.color
+	local feat = UI.mk("Frame", { Position = UDim2.fromOffset(SW - 16 - 290, 50), Size = UDim2.fromOffset(250, 238), BackgroundTransparency = 1, ZIndex = 8, Parent = stage })
+	Kit.slice("tile", gold, feat, 8, 0.4)
+	UI.mk("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0, 96), Size = UDim2.fromOffset(240, 240), BackgroundTransparency = 1,
+		Image = Kit.Art.radial, ImageColor3 = gold, ImageTransparency = 0.4, ZIndex = 9, Parent = feat,
+	})
 	self.bannerBay = feat
-	self.featName = Kit.text("", 14, C.white, 2)
-	self.featName.AnchorPoint = Vector2.new(0.5, 1)
-	self.featName.Position = UDim2.new(0.5, 0, 1, -58)
-	self.featName.Size = UDim2.fromOffset(138, 18)
-	Kit.fit(self.featName, 14, 9)
-	self.featName.ZIndex = 12
-	self.featName.Parent = feat
-	self.featRate = Kit.text("", 12, Game.RaritiesById.Legendary.color, 2, Kit.Body)
-	self.featRate.AnchorPoint = Vector2.new(0.5, 1)
-	self.featRate.Position = UDim2.new(0.5, 0, 1, -42)
-	self.featRate.Size = UDim2.fromOffset(138, 14)
-	self.featRate.ZIndex = 12
-	self.featRate.Parent = feat
-	Kit.plate(stage, "Featured", Game.RaritiesById.Legendary.color, UDim2.new(1, -154, 0, 84), UDim2.fromOffset(128, 26), 12)
-	local test = Kit.button("Test Drive", C.yellow, UDim2.fromOffset(140, 30), 14)
-	test.root.AnchorPoint = Vector2.new(0.5, 1)
-	test.root.Position = UDim2.new(0.5, 0, 1, -8)
+	Kit.plate(stage, "Featured Legendary", gold, UDim2.fromOffset(SW - 16 - 275, 36), UDim2.fromOffset(220, 28), 12)
+	self.featName = text("", 22, C.white, 2.5, feat, UDim2.new(0.5, 0, 1, -54), UDim2.fromOffset(230, 26), 12, Vector2.new(0.5, 0))
+	self.featRate = text("", 14, gold, 2, feat, UDim2.new(0.5, 0, 1, -28), UDim2.fromOffset(230, 18), 12, Vector2.new(0.5, 0), Kit.Body)
+	local test = Kit.button("Test Drive", C.yellow, UDim2.fromOffset(250, 40), 16)
+	test.root.Position = UDim2.fromOffset(SW - 16 - 290, 296)
 	test.root.ZIndex = 12
-	test.root.Parent = feat
+	test.root.Parent = stage
 	test.onClick = function() self:testDrive() end
 	self.testBtn = test
-	-- pay with: cash (the everyday way) or keys (luckier, and counts toward the guaranteed Legendary)
-	self.pay = "cash"
-	local paySeg, setPay = Kit.segment({ { id = "cash", label = "Cash" }, { id = "keys", label = "Keys" } }, "cash", 120, 36, function(id)
+
+	---------------------------------------------------------------
+	-- the bottom of the banner: the pity, how you pay, the rates, the two buttons
+	---------------------------------------------------------------
+	local by = SH - 96
+	self.pityText = text("", 15, C.white, 2, stage, UDim2.fromOffset(24, by), UDim2.fromOffset(330, 20), 12, nil, Kit.Body)
+	self.pityText.TextXAlignment = Enum.TextXAlignment.Left
+	local ptrack, pfill = Kit.bar(330, 18, gold, "change")
+	ptrack.Position = UDim2.fromOffset(24, by + 26)
+	ptrack.ZIndex = 12
+	ptrack.Parent = stage
+	self.pityFill = pfill
+	self.pitySub = text("", 12, C.white, 1.5, stage, UDim2.fromOffset(24, by + 50), UDim2.fromOffset(330, 16), 12, nil, Kit.Body)
+	self.pitySub.TextXAlignment = Enum.TextXAlignment.Left
+	self.pitySub.TextTransparency = 0.25
+	local paySeg, setPay = Kit.segment({ { id = "cash", label = "Cash" }, { id = "keys", label = "Keys" } }, "cash", 104, 34, function(id)
 		self.pay = id
 		self:refreshPay()
 	end)
-	paySeg.AnchorPoint = Vector2.new(0.5, 0)
-	paySeg.Position = UDim2.new(0.5, 0, 1, -146)
-	paySeg.ZIndex = 9
+	paySeg.Position = UDim2.fromOffset(380, by)
+	paySeg.ZIndex = 12
 	paySeg.Parent = stage
 	self.setPay = setPay
-	-- under the switch: the pity (keys) or what keys would bring (cash)
-	self.pityText = Kit.text("", 13, C.white, 1.5, Kit.Body)
-	self.pityText.AnchorPoint = Vector2.new(0.5, 1)
-	self.pityText.Position = UDim2.new(0.5, 0, 1, -88)
-	self.pityText.Size = UDim2.new(1, -28, 0, 16)
-	Kit.fit(self.pityText, 13, 9)
-	self.pityText.ZIndex = 9
-	self.pityText.Parent = stage
-	local ptrack, pfill = Kit.bar(460, 14, Game.RaritiesById.Legendary.color)
-	ptrack.AnchorPoint = Vector2.new(0.5, 1)
-	ptrack.Position = UDim2.new(0.5, 0, 1, -70)
-	ptrack.ZIndex = 9
-	ptrack.Parent = stage
-	self.pityFill, self.pityTrack = pfill, ptrack
-	-- two buttons: one crate, or three
-	local function btn(x: number, n: number)
-		local b = Kit.button("", C.green, UDim2.fromOffset(226, 52), 19)
-		b.root.AnchorPoint = Vector2.new(0, 1)
-		b.root.Position = UDim2.new(0, x, 1, -10)
-		b.root.ZIndex = 9
+	local rates = Kit.button("Drop Rates", C.grey, UDim2.fromOffset(216, 36), 16)
+	rates.root.Position = UDim2.fromOffset(380, by + 42)
+	rates.root.ZIndex = 12
+	rates.root.Parent = stage
+	rates.onClick = function() self:showRates() end
+	local function openBtn(x: number, n: number, label: string)
+		local b = Kit.button(label, C.green, UDim2.fromOffset(228, 78), 26)
+		b.root.Position = UDim2.fromOffset(x, by - 2)
+		b.root.ZIndex = 12
 		b.root.Parent = stage
 		b.onClick = function() self:openCrate(self.zone, self.pay, n) end
+		local h = b.root:FindFirstChild("Holder") :: Frame
+		b.label.Position = UDim2.new(0.5, 0, 0.5, -12)
+		b.label.Size = UDim2.new(1, -28, 0, 30)
+		local row = UI.mk("Frame", { AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0.5, 6), Size = UDim2.fromOffset(160, 24), BackgroundTransparency = 1, ZIndex = 5, Parent = h })
+		UI.mk("UIListLayout", { FillDirection = Enum.FillDirection.Horizontal, HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center, Padding = UDim.new(0, 5), Parent = row })
+		local coin = UI.mk("ImageLabel", { Size = UDim2.fromOffset(26, 26), BackgroundTransparency = 1, Image = Kit.Icon.cash, ZIndex = 5, LayoutOrder = 1, Parent = row })
+		local price = Kit.text("", 19, C.white, 2)
+		price.AutomaticSize = Enum.AutomaticSize.X
+		price.Size = UDim2.fromOffset(0, 24)
+		price.ZIndex = 5
+		price.LayoutOrder = 2
+		price.Parent = row
+		;(b :: any).setPrice = function(t: string, keys: boolean)
+			price.Text = t
+			coin.Image = if keys then Kit.Icon.key else Kit.Icon.cash
+		end
 		return b
 	end
-	self.openBtns = { one = btn(12, 1), three = btn(12 + 226 + 8, Game.Crate.MaxOpen) }
+	local N = Game.Crate.Multi
+	self.openBtns = { one = openBtn(SW - 16 - 476, 1, "Open 1"), many = openBtn(SW - 16 - 240, N, ("Open %d"):format(N)) }
+	-- the big open's promise, a ribbon on its corner
+	local ribbon = Kit.plate(self.openBtns.many.root, "Rare+ inside", C.purple, UDim2.new(0.5, -58, 0, -16), UDim2.fromOffset(116, 24), 14)
+	ribbon.Rotation = -3
 
-	---------------------------------------------------------------
-	-- the right: what's inside, a row a tyre (rarest first): it turns in its well, its name, what it
-	-- pays (x cash) and its chance the way you're paying; a tyre that would beat your launch tyre
-	-- says UPGRADE, one you've found has a tick
-	---------------------------------------------------------------
-	local rates = UI.mk("Frame", { Position = UDim2.fromOffset(766, 54), Size = UDim2.fromOffset(212, 528), BackgroundTransparency = 1, ZIndex = 4, Parent = face })
-	Kit.slot(rates, Kit.NEUTRAL, 4)
-	local it = Kit.text("WHAT'S INSIDE", 18, C.white, 2.5)
-	it.Position = UDim2.fromOffset(0, 12)
-	it.Size = UDim2.new(1, 0, 0, 24)
-	it.ZIndex = 6
-	it.Parent = rates
-	self.compare = Kit.text("", 13, C.muted, 1.5, Kit.Body)
-	self.compare.Position = UDim2.fromOffset(8, 38)
-	self.compare.Size = UDim2.new(1, -16, 0, 32)
-	self.compare.TextWrapped = true
-	Kit.fit(self.compare, 13, 9)
-	self.compare.ZIndex = 6
-	self.compare.Parent = rates
-	self.inside = UI.mk("ScrollingFrame", {
-		Position = UDim2.fromOffset(6, 74), Size = UDim2.new(1, -12, 1, -122), BackgroundTransparency = 1, BorderSizePixel = 0,
-		ScrollBarThickness = 4, ScrollBarImageColor3 = C.line, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(), ZIndex = 6, Parent = rates,
-	})
-	UI.mk("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder, Parent = self.inside })
-	UI.mk("UIPadding", { PaddingTop = UDim.new(0, 2), PaddingLeft = UDim.new(0, 2), PaddingBottom = UDim.new(0, 6), Parent = self.inside })
-	self.insideRows = {}
-	local mut = Kit.text("Any tyre can roll Gold x2, Chrome x3 or Rainbow x5.", 12, C.muted, 1, Kit.Body)
-	mut.AnchorPoint = Vector2.new(0.5, 1)
-	mut.Position = UDim2.new(0.5, 0, 1, -10)
-	mut.Size = UDim2.new(1, -16, 0, 32)
-	mut.TextWrapped = true
-	mut.ZIndex = 6
-	mut.Parent = rates
-
-	-- the opening, full screen
-	local overlay = UI.mk("Frame", { Name = "CrateStage", Size = UDim2.new(1, 0, 1, 120), Position = UDim2.fromOffset(0, -60), BackgroundColor3 = Color3.fromRGB(8, 8, 8), BackgroundTransparency = 1, Visible = false, ZIndex = 60, Parent = gui })
+	-- the drop rates (a popup) and the opening (full screen)
+	self.ratesBox = nil
+	local overlay = UI.mk("Frame", { Name = "CrateStage", Size = UDim2.new(1, 0, 1, 120), Position = UDim2.fromOffset(0, -60), BackgroundColor3 = Color3.fromRGB(8, 8, 10), BackgroundTransparency = 1, Visible = false, ZIndex = 60, Parent = gui })
 	self.stage = overlay
-	self.tiles = self.openBtns
+
 	task.spawn(function()
 		while root.Parent do
-			if root.Visible and self.shown then self:tickBanner() end
+			if root.Visible then self:tickBanner() end
 			task.wait(1)
 		end
 	end)
-	-- the drifting tyres behind the crate, and the tyres turning in the rows
+	-- the carousel behind the crate
 	task.spawn(function()
 		local t = 0
 		while root.Parent do
 			local dt = RunService.RenderStepped:Wait()
 			if root.Visible then
 				t += dt
-				for i, d in ipairs(self.driftItems) do
-					local a = t * 0.12 + d.phase
-					d.vp.Position = UDim2.fromOffset(170 + math.cos(a) * d.rx, 206 + math.sin(a) * d.ry)
-					if d.model then TyreShow.pose(d.model, t * d.spin + d.phase) end
-					local _ = i
-				end
-				for _, r in ipairs(self.insideRows) do
-					if r.model then TyreShow.pose(r.model, TyreShow.THUMB_YAW + t * 0.8 + r.phase) end
+				local n = #self.carouselItems
+				for i, d in ipairs(self.carouselItems) do
+					local a = t * 0.2 + (i - 1) / math.max(n, 1) * math.pi * 2
+					local depth = (math.sin(a) + 1) / 2
+					d.img.Position = UDim2.fromOffset(CX + math.cos(a) * 230, CY + 40 + math.sin(a) * 60 - 34)
+					local sz = 60 + depth * 40
+					d.img.Size = UDim2.fromOffset(sz, sz)
+					d.img.ImageTransparency = 0.7 - depth * 0.4
 				end
 			end
 		end
@@ -345,150 +330,223 @@ function Crates2:selectZone(id: string, instant: boolean?)
 	self.zone = id
 	for zid, t in pairs(self.tabs) do
 		local on = zid == id
-		Kit.tween(t.inner, 0.16, { Position = UDim2.fromOffset(on and 6 or 0, 0) }, Enum.EasingStyle.Back)
-		t.frame.ImageColor3 = if on then Kit.lift(ZONE_LOOK[zid].color, 0.12) else ZONE_LOOK[zid].color
+		Kit.tween(t.inner, 0.16, { Position = UDim2.fromOffset(0, on and -6 or 0) }, Enum.EasingStyle.Back)
+		t.frame.ImageColor3 = if on then Kit.lift(ZONE_LOOK[zid].color, 0.18) else ZONE_LOOK[zid].color:Lerp(Color3.fromRGB(40, 40, 48), 0.45)
 	end
 	self.bannerRing.ImageColor3 = look.color
 	self.stageGlow.ImageColor3 = look.color
-	self.bigCrate.Image = look.icon
+	self.stageGrad.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, look.color:Lerp(Color3.fromRGB(14, 14, 18), 0.45)),
+		ColorSequenceKeypoint.new(0.65, look.color:Lerp(Color3.fromRGB(14, 14, 18), 0.82)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(14, 14, 18)),
+	})
+	self.bigCrate.Image = look.big or look.icon
 	if not instant then
-		self.bigCrate.Size = UDim2.fromOffset(170, 170)
-		Kit.tween(self.bigCrate, 0.4, { Size = UDim2.fromOffset(210, 210) }, Enum.EasingStyle.Back)
+		self.bigCrate.Size = UDim2.fromOffset(250, 250)
+		Kit.tween(self.bigCrate, 0.4, { Size = UDim2.fromOffset(320, 320) }, Enum.EasingStyle.Back)
 	end
 	local z = Game.ZonesById[id]
 	self.bannerTitle.Text = string.upper(z.name) .. " CRATE"
-	self.bannerSub.Text = look.sub
-	self:fillInside(id)
-	self:fillDrift(id)
+	-- (its own Legendary on the card: picked again for this crate)
+	self.shownLegend = nil
+	self:tickBanner()
+	self:fillCarousel(id)
+	if self.ratesBox and self.ratesBox.Parent then self:showRates() end
 	if self.profile then self:setProfile(self.profile) end
 end
 
--- what's inside a crate: a row for every tyre it can give (not the Secrets), rarest first
-function Crates2:fillInside(zoneId: string)
-	local box = self.inside
-	if not box then return end
-	for _, c in ipairs(box:GetChildren()) do
-		if c:IsA("GuiObject") then c:Destroy() end
+-- a crate you haven't reached: its crate, its tyres and its Legendary as black silhouettes, the
+-- Legendary unnamed (what's in it stays a secret until you get there)
+function Crates2:shade()
+	local dark = self.locked == true
+	local col = if dark then SHADOW else Color3.new(1, 1, 1)
+	self.bigCrate.ImageColor3 = col
+	for _, d in ipairs(self.carouselItems) do d.img.ImageColor3 = col end
+	local f = self.bannerBay and self.bannerBay:FindFirstChild("Featured")
+	if f and f:IsA("ImageLabel") then
+		f.ImageColor3 = col
+	elseif f and f:IsA("ViewportFrame") then
+		f.ImageColor3 = col
+		f.Ambient = if dark then Color3.new(0, 0, 0) else Color3.fromRGB(170, 170, 180)
+		f.LightColor = if dark then Color3.new(0, 0, 0) else Color3.new(1, 1, 1)
 	end
-	self.insideRows = {}
-	-- each tyre's chance from a cash crate, and from a key crate (Epic and up KeyLuck times)
+	if dark then
+		self.featName.Text = "???"
+	elseif self.featName.Text == "???" then
+		self.shownLegend = nil
+		self:tickBanner()
+	end
+end
+
+-- the crate's own tyres circling slowly behind it
+function Crates2:fillCarousel(zoneId: string)
+	for _, d in ipairs(self.carouselItems) do d.img:Destroy() end
+	self.carouselItems = {}
+	local i = 0
+	for _, t in ipairs(Game.TyresByZone[zoneId] or {}) do
+		if TyreShow.Icons[t.id] and i < 8 then
+			i += 1
+			local img = UI.mk("ImageLabel", {
+				AnchorPoint = Vector2.new(0.5, 0.5), BackgroundTransparency = 1, Image = TyreShow.Icons[t.id], ScaleType = Enum.ScaleType.Fit,
+				ImageTransparency = 1, ImageColor3 = if self.locked then SHADOW else Color3.new(1, 1, 1), ZIndex = 6, Parent = self.carousel,
+			})
+			table.insert(self.carouselItems, { img = img })
+		end
+	end
+end
+
+-- each tyre in a crate and its chance, cash and keys (keys: Epic and up KeyLuck times); the
+-- Secrets as one unnamed entry
+function Crates2:odds(zoneId: string)
 	local list, kTotal = {}, 0
-	for _, e in ipairs(Game.crateOdds(zoneId, math.floor(workspace:GetServerTimeNow()))) do
+	local secretCash, secretKw = 0, 0
+	for _, e in ipairs(Game.crateOdds(zoneId)) do
 		local t = Game.TyresById[e.id]
 		if t then
 			local kw = e.odds * (if RARITY_ORDER[t.rarity] >= RARITY_ORDER.Epic then Game.Crate.KeyLuck else 1)
 			kTotal += kw
-			if t.rarity ~= "Secret" then table.insert(list, { t = t, odds = e.odds, kw = kw, featured = e.featured }) end
+			if t.rarity ~= "Secret" then
+				table.insert(list, { t = t, cash = e.odds, kw = kw, featured = e.featured })
+			else
+				secretCash += e.odds
+				secretKw += kw
+			end
 		end
 	end
+	-- (2026-10-24) the server's rule (Loop roll): with keys the Epic-and-up share is KeyLuck times the
+	-- cash share (at most 90%), Rare keeps its share and Common gives up the difference
+	local sum, pe, pr = 0, 0, 0
+	for _, e in ipairs(Game.crateOdds(zoneId)) do
+		local t = Game.TyresById[e.id]
+		if t then
+			sum += e.odds
+			if RARITY_ORDER[t.rarity] >= RARITY_ORDER.Epic then pe += e.odds elseif t.rarity ~= "Common" then pr += e.odds end
+		end
+	end
+	sum = math.max(sum, 1e-9)
+	pe, pr = pe / sum, pr / sum
+	local we = math.min(0.9, pe * Game.Crate.KeyLuck)
+	local wr = math.min(0.95 - we, pr)
+	local wc = 1 - we - wr
+	local pc = math.max(1e-9, 1 - pe - pr)
+	local function keyShare(t, odds: number): number
+		local o = odds / sum
+		if RARITY_ORDER[t.rarity] >= RARITY_ORDER.Epic then return if pe > 0 then o * we / pe else o end
+		if t.rarity ~= "Common" then return if pr > 0 then o * wr / pr else o end
+		return o * wc / pc
+	end
+	local _ = kTotal
+	for _, e in ipairs(list) do e.key = keyShare(e.t, e.cash) end
+	secretKw = 0
+	for _, e in ipairs(Game.crateOdds(zoneId)) do
+		local t = Game.TyresById[e.id]
+		if t and t.rarity == "Secret" then secretKw += keyShare(t, e.odds) end
+	end
+	kTotal = 1
 	table.sort(list, function(a, b)
 		local ra, rb = RARITY_ORDER[a.t.rarity], RARITY_ORDER[b.t.rarity]
 		if ra ~= rb then return ra > rb end
 		return a.t.num < b.t.num
 	end)
-	for i, e in ipairs(list) do
-		local r = Game.RaritiesById[e.t.rarity]
-		local row = UI.mk("Frame", { Name = e.t.id, Size = UDim2.new(1, -6, 0, 58), BackgroundTransparency = 1, LayoutOrder = i, ZIndex = 7, Parent = box })
-		Kit.slot(row, r.color, 7)
-		local vp, model = TyreShow.thumb(row, e.t.id, true, UDim2.fromOffset(46, 42), UDim2.new(0, 28, 0, 8))
-		vp.ZIndex = 9
-		local name = Kit.text(e.t.name, 13, C.white, 1.5)
-		name.TextXAlignment = Enum.TextXAlignment.Left
-		name.Position = UDim2.fromOffset(54, 6)
-		name.Size = UDim2.fromOffset(86, 16)
-		Kit.fit(name, 13, 8)
-		name.ZIndex = 9
-		name.Parent = row
-		local rar = Kit.text(string.upper(r.id) .. (if e.featured then "  ★" else ""), 11, r.color, 1.5, Kit.Body)
-		rar.TextXAlignment = Enum.TextXAlignment.Left
-		rar.Position = UDim2.fromOffset(54, 24)
-		rar.Size = UDim2.fromOffset(86, 14)
-		Kit.fit(rar, 11, 7)
-		rar.ZIndex = 9
-		rar.Parent = row
-		local mult = Kit.text("x" .. Game.multText(Game.tyreMult(e.t.id, 0, nil)), 14, C.gold, 1.5)
-		mult.AnchorPoint = Vector2.new(1, 0)
-		mult.TextXAlignment = Enum.TextXAlignment.Right
-		mult.Position = UDim2.new(1, -8, 0, 5)
-		mult.Size = UDim2.fromOffset(52, 18)
-		mult.ZIndex = 9
-		mult.Parent = row
-		local chance = Kit.text("", 12, C.text, 1.5, Kit.Body)
-		chance.AnchorPoint = Vector2.new(1, 0)
-		chance.TextXAlignment = Enum.TextXAlignment.Right
-		chance.Position = UDim2.new(1, -8, 0, 25)
-		chance.Size = UDim2.fromOffset(52, 16)
-		chance.ZIndex = 9
-		chance.Parent = row
-		local tag = Kit.text("", 10, C.green, 1.5, Kit.Body)
-		tag.TextXAlignment = Enum.TextXAlignment.Left
-		-- under the rarity, clear of the picture and the name
-		tag.Position = UDim2.fromOffset(54, 40)
-		tag.Size = UDim2.fromOffset(86, 12)
-		Kit.fit(tag, 10, 7)
-		tag.ZIndex = 10
-		tag.Parent = row
-		table.insert(self.insideRows, {
-			id = e.t.id, row = row, model = model, chance = chance, tag = tag, cash = e.odds, key = e.kw / math.max(kTotal, 1e-9),
-			mult = Game.tyreMult(e.t.id, 0, nil), phase = i * 0.7,
-		})
-	end
-	self:refreshPay()
+	return list, secretCash, secretKw / math.max(kTotal, 1e-9)
 end
 
--- the crate's tyres drifting behind it: up to seven, faint, round an ellipse, each turning
-function Crates2:fillDrift(zoneId: string)
-	for _, c in ipairs(self.drift:GetChildren()) do c:Destroy() end
-	self.driftItems = {}
-	local ids = {}
-	for _, t in ipairs(Game.TyresByZone[zoneId] or {}) do table.insert(ids, t.id) end
-	for _, t in ipairs(Game.TyresByZone.mythic or {}) do table.insert(ids, t.id) end
-	for i, id in ipairs(ids) do
-		if i > 7 then break end
-		local size = 74 + (i % 3) * 16
-		local vp, model = TyreShow.thumb(self.drift, id, true, UDim2.fromOffset(size, size), UDim2.new())
-		vp.AnchorPoint = Vector2.new(0.5, 0.5)
-		vp.ImageTransparency = 0.72
-		vp.ZIndex = 5
-		table.insert(self.driftItems, {
-			vp = vp, model = model, phase = (i - 1) / math.min(#ids, 7) * math.pi * 2, rx = 150 + (i % 2) * 40, ry = 120 + (i % 3) * 18,
-			spin = 0.35 + (i % 3) * 0.15,
-		})
-	end
-end
-
--- the switch between cash and keys: the buttons' prices, the chances in the rows, the pity line
-function Crates2:refreshPay()
+--==============================================================
+-- the drop rates: every outcome and its chance, the way you're paying
+--==============================================================
+function Crates2:showRates()
+	if self.ratesBox then self.ratesBox:Destroy() end
 	local keys = self.pay == "keys"
-	for _, r in ipairs(self.insideRows or {}) do
-		r.chance.Text = pct(if keys then r.key else r.cash)
-		r.chance.TextColor3 = if keys then C.gold else C.text
+	local box = UI.mk("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(760, 540), BackgroundTransparency = 1, ZIndex = 50, Parent = self.root })
+	self.ratesBox = box
+	local blocker = UI.mk("TextButton", { Size = UDim2.new(2, 0, 2, 0), Position = UDim2.fromScale(-0.5, -0.5), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.45, Text = "", AutoButtonColor = false, ZIndex = 50, Parent = box })
+	local holder, face = Kit.card(UDim2.fromOffset(760, 540), C.cream)
+	holder.Parent = box
+	for _, d in ipairs(holder:GetDescendants()) do if d:IsA("GuiObject") then d.ZIndex = math.max(d.ZIndex, 51) end end
+	holder.ZIndex = 51
+	Kit.header(face, "Drop Rates", C.purple, 56)
+	local z = Game.ZonesById[self.zone]
+	local sub = text(("%s Crate  ·  %s"):format(z.name, if keys then ("paying with keys: Epic and up x%d"):format(Game.Crate.KeyLuck) else "paying with cash"),
+		15, if keys then Game.RaritiesById.Legendary.color else C.white, 1.5, face, UDim2.fromOffset(24, 50), UDim2.fromOffset(712, 18), 53, nil, Kit.Body)
+	sub.TextXAlignment = Enum.TextXAlignment.Left
+	local grid = UI.mk("ScrollingFrame", {
+		Position = UDim2.fromOffset(18, 78), Size = UDim2.fromOffset(724, 390), BackgroundTransparency = 1, BorderSizePixel = 0,
+		ScrollBarThickness = 5, ScrollBarImageColor3 = C.line, AutomaticCanvasSize = Enum.AutomaticSize.Y, CanvasSize = UDim2.new(), ZIndex = 53, Parent = face,
+	})
+	UI.mk("UIGridLayout", { CellSize = UDim2.fromOffset(110, 132), CellPadding = UDim2.fromOffset(9, 10), SortOrder = Enum.SortOrder.LayoutOrder, HorizontalAlignment = Enum.HorizontalAlignment.Center, Parent = grid })
+	UI.mk("UIPadding", { PaddingTop = UDim.new(0, 6), PaddingBottom = UDim.new(0, 6), Parent = grid })
+	local list, secretCash, secretKey = self:odds(self.zone)
+	local function card(order: number, color: Color3, name: string, chance: number, id: string?, featured: boolean?)
+		local cell = UI.mk("Frame", { BackgroundTransparency = 1, LayoutOrder = order, ZIndex = 54, Parent = grid })
+		Kit.slice("tile", color, cell, 54, 0.3)
+		UI.mk("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0, 44), Size = UDim2.fromOffset(100, 100), BackgroundTransparency = 1,
+			Image = Kit.Art.radial, ImageColor3 = color, ImageTransparency = 0.5, ZIndex = 55, Parent = cell,
+		})
+		if id then
+			-- (a crate you haven't reached shows its tyres as silhouettes, unnamed)
+			TyreShow.thumb(cell, id, not self.locked, UDim2.fromOffset(74, 74), UDim2.new(0.5, 0, 0, 7)).ZIndex = 56
+		else
+			text("?", 46, color, 3, cell, UDim2.new(0.5, 0, 0, 44), UDim2.fromOffset(70, 60), 56, Vector2.new(0.5, 0.5))
+		end
+		if featured then text("★", 18, Game.RaritiesById.Legendary.color, 2, cell, UDim2.fromOffset(6, 4), UDim2.fromOffset(20, 20), 57) end
+		local n = text(if self.locked and id then "???" else name, 13, C.white, 1.5, cell, UDim2.new(0.5, 0, 0, 82), UDim2.new(1, -8, 0, 18), 56, Vector2.new(0.5, 0))
+		n.TextWrapped = false
+		text(pct(chance), 17, color, 2, cell, UDim2.new(0.5, 0, 0, 102), UDim2.new(1, -8, 0, 22), 56, Vector2.new(0.5, 0))
 	end
-	if self.pityTrack then self.pityTrack.Visible = keys end
-	if self.profile then self:setProfile(self.profile) end
+	if secretCash > 0 then card(0, Game.RaritiesById.Secret.color, "Secret", if keys then secretKey else secretCash) end
+	for i, e in ipairs(list) do
+		card(i, Game.RaritiesById[e.t.rarity].color, e.t.name, if keys then e.key else e.cash, e.t.id, e.featured)
+	end
+	local foot = text(("Open %d always holds one Rare or better.  Pity: a Legendary is guaranteed after %d key crates or %d cash crates without one.")
+		:format(Game.Crate.Multi, Game.Crate.Pity, Game.Crate.CashPity), 13, C.white, 1.5, face, UDim2.fromOffset(24, 478), UDim2.fromOffset(600, 34), 53, nil, Kit.Body)
+	foot.TextWrapped = true
+	foot.TextXAlignment = Enum.TextXAlignment.Left
+	foot.TextTransparency = 0.2
+	local x = Kit.close(48)
+	x.root.AnchorPoint = Vector2.new(1, 0)
+	x.root.Position = UDim2.new(1, 10, 0, -12)
+	x.root.ZIndex = 60
+	x.root.Parent = box
+	local function shut()
+		if self.ratesBox == box then self.ratesBox = nil end
+		Kit.vanish(box, 0.15, function() box:Destroy() end)
+	end
+	x.onClick = shut
+	blocker.Activated:Connect(shut)
+	Kit.pop(box, 0.85, 0.25)
 end
 
-function Crates2:setCount(n: number)
-	self.count = n
+-- the switch between cash and keys: the buttons' prices, the pity shown
+function Crates2:refreshPay()
+	if self.profile then self:setProfile(self.profile) end
+	if self.ratesBox and self.ratesBox.Parent then self:showRates() end
 end
 
 function Crates2:tickBanner()
 	local now = workspace:GetServerTimeNow()
 	local ev = Game.eventAt(math.floor(now)).on
-	local b = Game.banner(math.floor(now))
+	local b = Game.banner(math.floor(now), self.zone)
 	local leg = Game.TyresById[b.legendary]
-	local myth = Game.TyresById[b.mythic]
 	if b.legendary ~= self.shownLegend then
-		self.shownLegend = b.legendary
-		-- a new banner changes what's inside
-		self:fillInside(self.zone)
+		-- (counted as shown only once it's drawn: a crate picked while the screen's shut draws it on opening)
+		self.shownLegend = if self.root.Visible then b.legendary else nil
 		if self.bannerStop then self.bannerStop() end
+		self.bannerStop = nil
 		local old = self.bannerBay:FindFirstChild("Featured")
 		if old then old:Destroy() end
-		if self.root.Visible and self.shown then
-			local vp, stop = Crates2.tyreViewport(self.bannerBay, UDim2.new(1, -16, 0, 118), b.legendary)
+		if self.root.Visible then
+			local vp: GuiObject, stop = nil, function() end
+			if TyreShow.Icons[b.legendary] then
+				vp = TyreShow.thumb(self.bannerBay, b.legendary, true, UDim2.fromOffset(160, 160), UDim2.new(0.5, 0, 0, 14))
+			else
+				local v
+				v, stop = Crates2.tyreViewport(self.bannerBay, UDim2.fromOffset(176, 176), b.legendary)
+				v.AnchorPoint = Vector2.new(0.5, 0)
+				v.Position = UDim2.new(0.5, 0, 0, 16)
+				vp = v
+			end
 			vp.Name = "Featured"
-			vp.Position = UDim2.fromOffset(8, 6)
 			vp.ZIndex = 10
 			self.bannerStop = function()
 				stop()
@@ -498,24 +556,42 @@ function Crates2:tickBanner()
 	end
 	self.featName.Text = leg and leg.name or ""
 	local rush = ev and ev.id == "rush"
-	self.featRate.Text = rush and "LEGENDARY RUSH x5" or ("RATE UP x%d"):format(Game.Crate.FeaturedMult)
-	local nxt = Game.TyresById[b.nextLegendary]
-	self.bannerClock.Text = ("New banner in %s  ·  next: %s%s"):format(clock(b.ends - now), nxt and nxt.name or "?",
-		myth and ("  ·  Mythic: " .. myth.name) or "")
+	self.featRate.Text = if rush then "LEGENDARY RUSH x5" else ("RATE UP x%d"):format(Game.Crate.FeaturedMult)
+	self:shade()
+	self.bannerClock.Text = ("New banner in %s"):format(clock(b.ends - now))
 	-- the Test Drive: one a banner
 	local v = self.profile and self.profile.v2
 	local span = Game.Crate.BannerHours * 3600
 	local used = v and v.testDrive and math.floor(v.testDrive / span) == math.floor(now / span)
-	if v and v.testArmed then
-		self.testBtn.setText("Armed")
+	if self.locked then
+		-- (a locked crate's Legendary stays a secret: no driving it before you get there)
+		self.testBtn.setText("Test Drive: locked")
+		self.testBtn.setEnabled(false)
+	elseif v and v.testArmed then
+		self.testBtn.setText("Ready: next launch")
 		self.testBtn.setEnabled(false)
 	elseif used then
-		self.testBtn.setText("Used")
+		self.testBtn.setText("Test Drive used")
 		self.testBtn.setEnabled(false)
 	else
-		self.testBtn.setText("Test Drive")
+		self.testBtn.setText("Test Drive: free")
 		self.testBtn.setEnabled(true)
 	end
+end
+
+-- a button you can afford breathes; one you can't sits still and grey
+function Crates2:canBuy(b, on: boolean)
+	b.setEnabled(on)
+	local h = b.root:FindFirstChild("Holder") :: GuiObject
+	if on then Kit.breathe(h, 0.025, 2.4) else Kit.still(h) end
+end
+
+function Crates2:affordable(zoneId: string, pay: string, n: number): boolean
+	local p = self.profile
+	local v = p and p.v2
+	if not (p and v and v.zones[zoneId]) then return false end
+	if pay == "keys" then return v.keys >= Game.cratePrice(zoneId) * n end
+	return p.credits >= Game.crateCash(zoneId, v.tier, v) * n
 end
 
 function Crates2:setProfile(p)
@@ -523,12 +599,15 @@ function Crates2:setProfile(p)
 	if not p or not p.v2 then return end
 	local v = p.v2
 	self.keysText.Text = tostring(v.keys)
-	local N = Game.Crate.MaxOpen
+	local N = Game.Crate.Multi
 	for _, z in ipairs(Game.Zones) do
 		local t = self.tabs[z.id]
 		local unlocked = v.zones[z.id] == true
-		t.veil.Visible = not unlocked
-		t.status.Text = if unlocked then ("$%s a crate"):format(Game.short(Game.crateCash(z.id, v.tier))) else ("Reach %s"):format(Game.metres(z.start))
+		t.lock.Visible = not unlocked
+		t.crate.ImageTransparency = 0
+		t.crate.ImageColor3 = if unlocked then Color3.new(1, 1, 1) else SHADOW
+		t.status.Text = if unlocked then ("$%s a crate"):format(Game.short(Game.crateCash(z.id, v.tier, v))) else ("Reach %s"):format(Game.metres(z.start))
+		t.status.TextColor3 = if unlocked then C.gold else C.muted
 	end
 	local z = self.zone
 	local unlocked = v.zones[z] == true
@@ -536,70 +615,61 @@ function Crates2:setProfile(p)
 	local keys = self.pay == "keys"
 	if keys then
 		local k1 = Game.cratePrice(z)
-		b.one.setText(("Open  ·  %d Key%s"):format(k1, k1 == 1 and "" or "s"))
-		b.three.setText(("Open x%d  ·  %d Keys"):format(N, k1 * N))
+		b.one.setPrice(tostring(k1), true)
+		b.many.setPrice(tostring(k1 * N), true)
 		b.one.setColor(C.purple)
-		b.three.setColor(C.purple)
-		b.one.setEnabled(unlocked and v.keys >= k1)
-		b.three.setEnabled(unlocked and v.keys >= k1 * N)
-		local left = math.max(1, Game.Crate.Pity - v.pity)
-		self.pityText.Text = ("Epic and up x%d  ·  Legendary guaranteed in %d key crate%s"):format(Game.Crate.KeyLuck, left, left == 1 and "" or "s")
-		self.pityFill.Size = UDim2.fromScale(math.clamp(v.pity / Game.Crate.Pity, 0, 1), 1)
+		b.many.setColor(C.purple)
 	else
-		local c1 = Game.crateCash(z, v.tier)
-		b.one.setText(("Open  ·  $%s"):format(Game.short(c1)))
-		b.three.setText(("Open x%d  ·  $%s"):format(N, Game.short(c1 * N)))
+		local c1 = Game.crateCash(z, v.tier, v)
+		b.one.setPrice(Game.short(c1), false)
+		b.many.setPrice(Game.short(c1 * N), false)
 		b.one.setColor(C.green)
-		b.three.setColor(C.green)
-		b.one.setEnabled(unlocked and p.credits >= c1)
-		b.three.setEnabled(unlocked and p.credits >= c1 * N)
-		self.pityText.Text = "Pay with keys for Epic and up twice as often"
+		b.many.setColor(C.green)
 	end
-	if not unlocked then
-		self.pityText.Text = ("Reach %s to open this crate"):format(Game.metres(Game.ZonesById[z].start))
-	end
-	-- the rows against your launch tyre: anything that pays more is an upgrade
-	local mine = 1
-	for _, t in ipairs(v.inv) do
-		if t.uid == v.launch then mine = Game.tyreMult(t.id, t.forge, t.mut) end
-	end
-	local best = 0
-	for _, r in ipairs(self.insideRows or {}) do
-		best = math.max(best, r.mult)
-		local found = v.index and v.index[r.id] == true
-		if r.mult > mine then
-			r.tag.Text = "▲ UPGRADE"
-			r.tag.TextColor3 = C.green
-		elseif found then
-			r.tag.Text = "✓ FOUND"
-			r.tag.TextColor3 = C.muted
-		else
-			r.tag.Text = ""
-		end
-	end
-	self.compare.Text = ("Your launch tyre pays <font color=\"#ECC478\">x%s</font>. The best in here pays <font color=\"#56C248\">x%s</font>."):format(
-		Game.multText(mine), Game.multText(best))
+	self:canBuy(b.one, self:affordable(z, self.pay, 1))
+	self:canBuy(b.many, self:affordable(z, self.pay, N))
+	-- the pity, whichever way you pay
+	local count = if keys then (v.pity or 0) else (v.cashPity or 0)
+	local cap = if keys then Game.Crate.Pity else Game.Crate.CashPity
+	local left = math.max(1, cap - count)
+	self.pityText.Text = ('LEGENDARY GUARANTEED IN <font color="#FFBE3C">%d</font>'):format(left)
+	self.pityFill.Size = UDim2.fromScale(math.clamp(count / cap, 0, 1), 1)
+	self.lockVeil.Visible = not unlocked
+	self.locked = not unlocked
+	self:shade()
+	self.lockText.Text = ("LOCKED  ·  reach %s"):format(Game.metres(Game.ZonesById[z].start))
+	self.pitySub.Text = if not unlocked then ("Reach %s to open this crate"):format(Game.metres(Game.ZonesById[z].start))
+		elseif keys then ("Key crates: Epic and up x%d"):format(Game.Crate.KeyLuck) else "Counted for cash crates"
 end
 
 function Crates2:open()
 	Kit.dim(self.gui or self.root.Parent, self, true)
+	-- (2026-10-23) the tutorial says "your key opens a crate": open on Keys then, if a key crate is affordable
+	if self.preferKeys then
+		self.preferKeys = false
+		if self.zone and self.setPay and self:affordable(self.zone, "keys", 1) then
+			self.pay = "keys"
+			self.setPay("keys")
+			self:refreshPay()
+		end
+	end
 	Kit.open(self.root)
-	self.shown = true
 	self.shownLegend = nil
 	self:tickBanner()
 end
 
 function Crates2:close()
 	Kit.dim(self.gui or self.root.Parent, self, false)
-	self.shown = false
+	if self.ratesBox then
+		self.ratesBox:Destroy()
+		self.ratesBox = nil
+	end
 	if self.root.Visible then Kit.close_(self.root) end
 	if self.bannerStop then
 		self.bannerStop()
 		self.bannerStop = nil
 	end
 	self.shownLegend = nil
-	for _, stop in ipairs(self.stops) do stop() end
-	self.stops = {}
 end
 
 function Crates2:isOpen(): boolean
@@ -608,7 +678,7 @@ end
 
 function Crates2:testDrive()
 	local f = self.R:FindFirstChild("TestDrive") :: RemoteFunction?
-	local ok, res = pcall(function() return f and f:InvokeServer() end)
+	local ok, res = pcall(function() return f and f:InvokeServer(self.zone) end)
 	if ok and type(res) == "table" and res.ok then
 		local t = Game.TyresById[res.tyre]
 		Kit.callout(self.gui, ("TEST DRIVE: %s on your next launch"):format(t and t.name or ""), C.yellow, UDim2.fromScale(0.5, 0.15), 34)
@@ -621,212 +691,360 @@ end
 function Crates2:openCrate(zoneId: string, pay: string, count: number?)
 	if self.busy then return end
 	self.busy = true
-	local n = count or self.count
+	local n = count or 1
 	local ok, res = pcall(function() return (self.R :: any).OpenCrate:InvokeServer(zoneId, n, pay) end)
 	if not (ok and type(res) == "table" and res.ok) then
 		self.busy = false
-		local which = if n > 1 then "three" else "one"
+		self.auto = false
+		local which = if n > 1 then "many" else "one"
 		if self.openBtns[which] then Kit.shake(self.openBtns[which].root, 6, 0.25) end
 		if ok and type(res) == "table" and res.err then
 			Kit.callout(self.gui, res.err, C.red, UDim2.fromScale(0.5, 0.15), 30)
 		end
 		return
 	end
-	self:close()
+	if self.root.Visible then self:close() end
 	self:reveal(zoneId, res.got, pay, n)
 end
 
 --==============================================================
 -- the opening
 --==============================================================
-local SHUTTER = "rbxassetid://110040308815604"
-local SPOT = "rbxassetid://119243950784301"
-
--- one bay: builds it shut, returns the function that plays its opening (blocking) and the stop
-local function makeBay(stage: Frame, x: UDim2, got, pace: { k: number })
+-- a card face-up: a tyre on its rarity's colours
+local function frontOf(card: Frame, got, size: Vector2)
 	local tyre = Game.TyresById[got.id]
 	local rar = Game.RaritiesById[tyre.rarity]
-	local rank = RARITY_ORDER[tyre.rarity]
-	local special = rank >= RARITY_ORDER.Epic
-	local mythic = rank >= RARITY_ORDER.Mythic
-	local mut = got.mut and Game.MutationsById[got.mut]
-	local holder = UI.mk("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = x, Size = UDim2.fromOffset(260, 260),
-		BackgroundTransparency = 1, ZIndex = 62, Parent = stage,
-	})
-	local well = Kit.slot(holder, Kit.NEUTRAL, 62)
-	local edgeArt = well:FindFirstChild("EdgeArt") :: ImageLabel
-	local wash = well:FindFirstChild("Wash") :: ImageLabel
-	wash.ImageTransparency = 1
-	local bay = UI.mk("Frame", {
-		Position = UDim2.fromOffset(9, 9), Size = UDim2.new(1, -18, 1, -18), BackgroundTransparency = 1, ClipsDescendants = true,
-		ZIndex = 63, Parent = holder,
-	}, { UI.corner(12) })
-	local flood = UI.mk("ImageLabel", {
-		Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Image = Kit.Art.glow, ImageColor3 = rar.color, ImageTransparency = 1,
-		ZIndex = 63, Parent = bay,
-	})
+	local front = UI.mk("Frame", { Name = "Front", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 72, Visible = false, Parent = card })
+	Kit.slice("tile", rar.color, front, 72, size.X / 520)
 	UI.mk("ImageLabel", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.8), Size = UDim2.fromScale(0.85, 0.24), BackgroundTransparency = 1,
-		Image = SPOT, ZIndex = 64, Parent = bay,
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.36), Size = UDim2.fromScale(1.15, 0.95), BackgroundTransparency = 1,
+		Image = Kit.Art.radial, ImageColor3 = rar.color, ImageTransparency = 0.35, ZIndex = 73, Parent = front,
 	})
-	local vp, stop = Crates2.tyreViewport(bay, UDim2.fromOffset(230, 230), got.id)
-	vp.AnchorPoint = Vector2.new(0.5, 0.5)
-	vp.Position = UDim2.fromScale(0.5, 0.3)
-	vp.ImageTransparency = 1
-	vp.ZIndex = 65
-	local shutter = UI.mk("ImageLabel", {
-		Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Image = SHUTTER, ScaleType = Enum.ScaleType.Stretch, ZIndex = 66, Parent = bay,
-	})
-	local function slow(t: number) task.wait(t * pace.k) end
-	-- every bay rattles from the start; each opens on its turn (`wait` in), the rare ones last
-	local function play(wait: number)
-		local rattle = wait + 0.5 + 0.12 * rank + (special and 0.35 or 0)
-		local hard = 1 + 0.3 * rank
-		local tt = 0
-		local last = os.clock()
-		local conn = RunService.RenderStepped:Connect(function()
-			local now = os.clock()
-			tt += (now - last) / pace.k
-			last = now
-			local t = tt
-			local k = math.clamp(t / rattle, 0, 1) ^ 1.5
-			local jump = math.abs(math.sin(t * (18 + 26 * k))) * (1.5 + 3.5 * k) * hard
-			shutter.Position = UDim2.fromOffset(math.sin(t * 61) * 0.8 * k * hard, -jump)
-			holder.Rotation = math.sin(t * (30 + 40 * k)) * 0.6 * k * (special and 1.6 or 1)
-		end)
-		while tt < rattle do RunService.RenderStepped:Wait() end
-		conn:Disconnect()
-		holder.Rotation = 0
-		shutter.Position = UDim2.new()
-		Kit.tween(shutter, 0.5, { Position = UDim2.fromScale(0, -1.02) }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-		slow(0.16)
-		Kit.tween(edgeArt, 0.3, { ImageColor3 = rar.color })
-		Kit.tween(wash, 0.3, { ImageTransparency = 0.25 })
-		flood.ImageTransparency = 0.05
-		Kit.tween(flood, 0.6, { ImageTransparency = 0.55 })
-		if special then Kit.shake(stage, mythic and 14 or 8, 0.3) end
-		if mythic then
-			local flash = UI.mk("Frame", { Size = UDim2.fromScale(1, 1), BackgroundColor3 = rar.color, BackgroundTransparency = 0.35, BorderSizePixel = 0, ZIndex = 61, Parent = stage })
-			Kit.tween(flash, 0.5, { BackgroundTransparency = 1 })
-			task.delay(0.55, function() flash:Destroy() end)
-		end
-		Kit.pop(holder, 1.08, 0.3)
-		Kit.tween(vp, 0.15, { ImageTransparency = 0 })
-		Kit.tween(vp, 0.6, { Position = UDim2.fromScale(0.5, 0.5) }, Enum.EasingStyle.Bounce, Enum.EasingDirection.Out)
-		slow(0.35)
-		-- what it is, under the bay
-		local function under(text: string, size: number, color: Color3, dy: number, font: Font?)
-			local l = Kit.text(text, size, color, 2.5, font)
-			l.AnchorPoint = Vector2.new(0.5, 0)
-			l.Position = x + UDim2.fromOffset(0, 136 + dy)
-			l.Size = UDim2.fromOffset(300, size + 6)
-			Kit.fit(l, size, 10)
-			l.ZIndex = 66
-			l.Parent = stage
-			Kit.appear(l, 0.04, 10)
-		end
-		under(string.upper(rar.id), 30, rar.color, 0)
-		under(tyre.name, 22, C.white, 36)
-		under(("x%s CASH"):format(Game.multText(Game.tyreMult(tyre.id, 0, got.mut))), 18, C.gold, 64, Kit.Body)
-		if mut then
-			local badge = Kit.plate(stage, mut.name .. "  x" .. Game.multText(mut.mult), mut.color, x + UDim2.fromOffset(40, -150), UDim2.fromOffset(130, 32), 68)
-			badge.Rotation = 0
-			Kit.pop(badge, 1.8, 0.22)
-		end
+	tyrePic(front, got.id, math.floor(size.X * 0.72), UDim2.new(0.5, 0, 0.04, 0), 74)
+	local s = size.X / 150
+	text(string.upper(rar.id), math.floor(15 * s), rar.color, 2.5, front, UDim2.new(0.5, 0, 0.6, 0), UDim2.new(1, -8, 0, math.floor(18 * s)), 75, Vector2.new(0.5, 0))
+	local nm = text(tyre.name, math.floor(14 * s), C.white, 2, front, UDim2.new(0.5, 0, 0.72, 0), UDim2.new(1, -8, 0, math.floor(17 * s)), 75, Vector2.new(0.5, 0))
+	nm.TextWrapped = false
+	text(("x%s CASH"):format(Game.multText(Game.tyreMult(tyre.id, 0, got.mut))), math.floor(13 * s), C.gold, 2, front, UDim2.new(0.5, 0, 0.84, 0), UDim2.new(1, -8, 0, math.floor(16 * s)), 75, Vector2.new(0.5, 0), Kit.Body)
+	local mut = got.mut and Game.MutationsById[got.mut]
+	if mut then
+		local plate = Kit.plate(front, ("%s x%s"):format(mut.name, Game.multText(mut.mult)), mut.color, UDim2.new(0.5, -math.floor(52 * s), 0, -math.floor(10 * s)), UDim2.fromOffset(math.floor(104 * s), math.floor(22 * s)), 77)
+		plate.Rotation = -4
 	end
-	return play, stop, holder, rank
+	if got.new then
+		local tag = Kit.plate(front, "NEW", C.green, UDim2.new(1, -math.floor(46 * s), 0, math.floor(6 * s)), UDim2.fromOffset(math.floor(42 * s), math.floor(20 * s)), 77)
+		tag.Rotation = 8
+	end
+	return front, rar, RARITY_ORDER[tyre.rarity]
+end
+
+-- a card face-down: the crate's colours, a tyre's shadow, a question mark
+local function backOf(card: Frame, zoneColor: Color3, size: Vector2)
+	local back = UI.mk("Frame", { Name = "Back", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 72, Parent = card })
+	Kit.slice("tile", zoneColor:Lerp(Color3.fromRGB(60, 60, 70), 0.35), back, 72, size.X / 520)
+	UI.mk("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.45), Size = UDim2.fromScale(0.62, 0.5), BackgroundTransparency = 1,
+		Image = Kit.Icon.tyre, ImageColor3 = Color3.fromRGB(70, 70, 82), ZIndex = 73, Parent = back,
+	})
+	text("?", math.floor(size.X * 0.32), Color3.fromRGB(220, 220, 230), 3, back, UDim2.fromScale(0.5, 0.45), UDim2.fromScale(0.6, 0.5), 74, Vector2.new(0.5, 0.5))
+	return back
+end
+
+-- turn a card over: it narrows to nothing, shows its face, and springs back out
+local function flip(card: Frame, back: Frame, front: Frame, fast: boolean)
+	local t = if fast then 0.04 else 0.09
+	local w = card:GetAttribute("W") :: number
+	local h = card.Size.Y.Offset
+	local half = Kit.tween(card, t, { Size = UDim2.fromOffset(0, h) })
+	half.Completed:Wait()
+	back.Visible = false
+	front.Visible = true
+	Kit.tween(card, t, { Size = UDim2.fromOffset(w, h) }, Enum.EasingStyle.Back)
+	task.wait(t)
+end
+
+function Crates2:finishReveal()
+	local outer = self.stage
+	if self.revealConn then self.revealConn:Disconnect() end
+	self.revealConn = nil
+	Kit.tween(outer, 0.2, { BackgroundTransparency = 1 })
+	for _, c in ipairs(outer:GetChildren()) do
+		if c:IsA("GuiObject") then c.Visible = false end
+	end
+	task.delay(0.2, function()
+		outer.Visible = false
+		outer:ClearAllChildren()
+		self.busy = false
+	end)
 end
 
 function Crates2:reveal(zoneId: string, gots, pay: string, count: number)
-	local pace = { k = workspace:GetAttribute("KitSlow") or 1 }
+	local look = ZONE_LOOK[zoneId]
+	local zone = Game.ZonesById[zoneId]
 	local outer = self.stage
 	outer:ClearAllChildren()
 	outer.Visible = true
 	outer.BackgroundTransparency = 1
-	Kit.tween(outer, 0.25, { BackgroundTransparency = 0.12 })
-	-- everything in one box that scales with the screen
+	Kit.tween(outer, 0.25, { BackgroundTransparency = 0.08 })
+	local pace = { fast = false }
 	local stage = UI.mk("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(1000, 640),
-		BackgroundTransparency = 1, ZIndex = 61, Parent = outer,
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(1280, 760), BackgroundTransparency = 1, ZIndex = 61, Parent = outer,
 	})
 	UI.autoScale(stage, 1280, 760)
-	-- a tap anywhere hurries the opening along
-	local hurry = UI.mk("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 60, Parent = outer })
-	hurry.Activated:Connect(function() pace.k = math.min(pace.k, 0.25) end)
-	local zone = Game.ZonesById[zoneId]
-	Kit.plate(stage, zone.name .. " Crate" .. (#gots > 1 and (" x" .. #gots) or ""), Kit.NEUTRAL, UDim2.new(0.5, -120, 0, 40), UDim2.fromOffset(240, 34), 67)
-	local skip = Kit.text("Tap to hurry", 14, C.muted, 1.5, Kit.Body)
-	skip.AnchorPoint = Vector2.new(0.5, 0)
-	skip.Position = UDim2.new(0.5, 0, 0, 78)
-	skip.Size = UDim2.fromOffset(200, 18)
-	skip.ZIndex = 67
-	skip.Parent = stage
-	local stops = {}
-	local bays = {}
-	local n = #gots
-	for i, got in ipairs(gots) do
-		local dx = (i - (n + 1) / 2) * 300
-		local play, stop, holder, rank = makeBay(stage, UDim2.new(0.5, dx, 0, 250), got, pace)
-		table.insert(bays, { play = play, holder = holder, rank = rank, i = i })
-		table.insert(stops, stop)
+	-- the zone's light behind everything; it takes the best thing's colour at the burst
+	local glow = UI.mk("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.48), Size = UDim2.fromOffset(900, 900), BackgroundTransparency = 1,
+		Image = Kit.Art.radial, ImageColor3 = look.color, ImageTransparency = 0.55, ZIndex = 61, Parent = stage,
+	})
+	local hurry = UI.mk("TextButton", { Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, Text = "", ZIndex = 61, Parent = outer })
+	hurry.Activated:Connect(function() pace.fast = true end)
+	local skip = Kit.button("Skip", C.grey, UDim2.fromOffset(120, 42), 18)
+	skip.root.AnchorPoint = Vector2.new(1, 0)
+	skip.root.Position = UDim2.new(1, -30, 0, 30)
+	skip.root.ZIndex = 90
+	skip.root.Parent = stage
+	skip.onClick = function() pace.fast = true end
+	Kit.plate(stage, zone.name .. " Crate" .. (if #gots > 1 then (" x" .. #gots) else ""), Kit.NEUTRAL, UDim2.new(0.5, -130, 0, 34), UDim2.fromOffset(260, 36), 80)
+	local function wait(t: number) if not pace.fast then task.wait(t) else task.wait(math.min(t, 0.03)) end end
+
+	-- the best thing in it decides the burst (nobody knows it until then)
+	local best, bestRank = gots[1], 0
+	for _, g in ipairs(gots) do
+		local r = RARITY_ORDER[Game.TyresById[g.id].rarity]
+		if r > bestRank then best, bestRank = g, r end
 	end
-	task.wait(0.3 * pace.k)
-	-- the rarest opens last; the rest left to right
-	local order = table.clone(bays)
-	table.sort(order, function(a, b)
-		if a.rank ~= b.rank then return a.rank < b.rank end
-		return a.i < b.i
+	local bestRar = Game.RaritiesById[Game.TyresById[best.id].rarity]
+	local legendaryUp = bestRank >= RARITY_ORDER.Legendary
+	local epicUp = bestRank >= RARITY_ORDER.Epic
+
+	-- 1 the crate slams down
+	local crate = UI.mk("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, -0.3), Size = UDim2.fromOffset(380, 380), BackgroundTransparency = 1,
+		Image = look.big or look.icon, ScaleType = Enum.ScaleType.Fit, ZIndex = 66, Parent = stage,
+	})
+	local heat = UI.mk("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(300, 300), BackgroundTransparency = 1,
+		Image = Kit.Art.radial, ImageColor3 = Color3.new(1, 1, 1), ImageTransparency = 1, ZIndex = 65, Parent = stage,
+	})
+	local fall = Kit.tween(crate, if pace.fast then 0.1 else 0.42, { Position = UDim2.fromScale(0.5, 0.5) }, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+	fall.Completed:Wait()
+	Sound.play("land", { volume = 0.8, pitch = 0.8 })
+	Kit.shake(stage, 10, 0.25)
+	Kit.pop(crate, 0.82, 0.3)
+	wait(0.35)
+
+	-- 2 it rattles, harder and harder, a white light swelling behind it
+	local rattle = if #gots > 1 then 1.5 else 1.15
+	local t0 = os.clock()
+	while true do
+		local t = os.clock() - t0
+		if t >= rattle or pace.fast then break end
+		local k = (t / rattle) ^ 1.6
+		crate.Rotation = math.sin(t * (24 + 40 * k)) * (2 + 9 * k)
+		crate.Position = UDim2.new(0.5, math.sin(t * 57) * 6 * k, 0.5, -math.abs(math.sin(t * (14 + 20 * k))) * 14 * k)
+		heat.ImageTransparency = 1 - 0.85 * k
+		heat.Size = UDim2.fromOffset(300 + 260 * k, 300 + 260 * k)
+		RunService.RenderStepped:Wait()
+	end
+	crate.Rotation = 0
+
+	-- 3 the burst: a flash, a ring, and the light of the best thing inside
+	local flash = UI.mk("Frame", { Size = UDim2.new(2, 0, 2, 0), Position = UDim2.fromScale(-0.5, -0.5), BackgroundColor3 = Color3.new(1, 1, 1), BackgroundTransparency = 0.05, BorderSizePixel = 0, ZIndex = 89, Parent = stage })
+	Kit.tween(flash, 0.5, { BackgroundTransparency = 1 })
+	Kit.tween(crate, 0.25, { Size = UDim2.fromOffset(560, 560), ImageTransparency = 1 })
+	heat.ImageTransparency = 1
+	local ring = UI.mk("ImageLabel", {
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(120, 120), BackgroundTransparency = 1,
+		Image = Kit.Art.radial, ImageColor3 = bestRar.color, ImageTransparency = 0.1, ZIndex = 64, Parent = stage,
+	})
+	Kit.tween(ring, 0.7, { Size = UDim2.fromOffset(1400, 1400), ImageTransparency = 1 }, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	Kit.tween(glow, 0.5, { ImageColor3 = bestRar.color, ImageTransparency = if epicUp then 0.2 else 0.45 })
+	-- the sunburst in the best thing's colour (art/ui/burst.py): broad tapered rays one way, fine ones
+	-- the other, both soft and fading out from the middle; it breathes a little as it turns
+	local function burst(img: string, size: number, z: number, alpha: number)
+		local b = UI.mk("ImageLabel", {
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.48), Size = UDim2.fromOffset(size * 0.6, size * 0.6), BackgroundTransparency = 1,
+			Image = img, ImageColor3 = bestRar.color, ImageTransparency = 1, ZIndex = z, Parent = stage,
+		})
+		Kit.tween(b, 0.6, { ImageTransparency = alpha, Size = UDim2.fromOffset(size, size) }, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		return b
+	end
+	local broad = burst(Kit.Icon.burst_a, 1500, 62, if epicUp then 0.05 else 0.5)
+	local fine = burst(Kit.Icon.burst_b, 1300, 62, if epicUp then 0.25 else 0.68)
+	-- the twinkles: four-point stars popping in and out around the cards
+	local twinkles = {}
+	local rng = Random.new()
+	local nextTwinkle = 0
+	self.revealConn = RunService.RenderStepped:Connect(function(dt)
+		local spin = if legendaryUp then 16 else 7
+		broad.Rotation += dt * spin
+		fine.Rotation -= dt * spin * 0.6
+		local breathe = 1 + math.sin(os.clock() * 2.2) * 0.04
+		broad.Size = UDim2.fromOffset(1500 * breathe, 1500 * breathe)
+		if os.clock() > nextTwinkle and #twinkles < (if epicUp then 14 else 8) then
+			nextTwinkle = os.clock() + rng:NextNumber(0.06, 0.18)
+			local a = rng:NextNumber(0, math.pi * 2)
+			local r = rng:NextNumber(240, 480)
+			local s = rng:NextNumber(20, if legendaryUp then 64 else 44)
+			local tw = UI.mk("ImageLabel", {
+				AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, math.cos(a) * r * 1.3, 0.48, math.sin(a) * r * 0.8), Size = UDim2.fromOffset(0, 0),
+				BackgroundTransparency = 1, Image = Kit.Icon.sparkle, ImageColor3 = bestRar.color:Lerp(Color3.new(1, 1, 1), 0.6), Rotation = rng:NextNumber(-20, 20), ZIndex = 63, Parent = stage,
+			})
+			table.insert(twinkles, tw)
+			local life = rng:NextNumber(0.5, 0.9)
+			Kit.tween(tw, life * 0.4, { Size = UDim2.fromOffset(s, s) }, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+			task.delay(life * 0.5, function()
+				if tw.Parent then Kit.tween(tw, life * 0.5, { Size = UDim2.fromOffset(0, 0), Rotation = tw.Rotation + 45 }) end
+			end)
+			task.delay(life + 0.05, function()
+				local i = table.find(twinkles, tw)
+				if i then table.remove(twinkles, i) end
+				tw:Destroy()
+			end)
+		end
 	end)
-	local left = #order
-	for turn, b in ipairs(order) do
-		task.spawn(function()
-			b.play((turn - 1) * 0.45)
-			left -= 1
-		end)
+	Sound.play("land", { volume = 1, pitch = if legendaryUp then 0.6 else 1.0 })
+	Kit.shake(stage, if legendaryUp then 22 elseif epicUp then 14 else 8, 0.35)
+	wait(0.25)
+	-- a Legendary or better: a hold, a gold wash, its own banner first
+	if legendaryUp and not pace.fast then
+		local wash = UI.mk("Frame", { Size = UDim2.new(2, 0, 2, 0), Position = UDim2.fromScale(-0.5, -0.5), BackgroundColor3 = bestRar.color, BackgroundTransparency = 0.4, BorderSizePixel = 0, ZIndex = 63, Parent = stage })
+		Kit.tween(wash, 1.2, { BackgroundTransparency = 1 })
+		local word = text(string.upper(bestRar.id) .. "!", 96, bestRar.color, 3, stage, UDim2.fromScale(0.5, 0.45), UDim2.fromOffset(900, 110), 88, Vector2.new(0.5, 0.5))
+		Kit.pop(word, 2.2, 0.35)
+		Sound.play("cheer", { length = 2.5 })
+		Sound.play("medal", { volume = 0.9, pitch = 1.1, length = 1.4 })
+		task.wait(1.1)
+		Kit.tween(word, 0.25, { TextTransparency = 1, Position = UDim2.fromScale(0.5, 0.3) })
+		local st = word:FindFirstChildOfClass("UIStroke")
+		if st then Kit.tween(st, 0.25, { Transparency = 1 }) end
+		task.wait(0.2)
 	end
-	while left > 0 do task.wait() end
-	skip.Visible = false
+
+	-- 4 the cards
+	local n = #gots
+	if n == 1 then
+		local size = Vector2.new(280, 360)
+		local card = UI.mk("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.47), Size = UDim2.fromOffset(size.X, size.Y), BackgroundTransparency = 1, ZIndex = 72, Parent = stage })
+		card:SetAttribute("W", size.X)
+		local front, rar = frontOf(card, gots[1], size)
+		front.Visible = true
+		card.Rotation = -30
+		Kit.pop(card, 0.2, 0.45)
+		Kit.tween(card, 0.45, { Rotation = 0 }, Enum.EasingStyle.Back)
+		Sound.play("gateWhoosh", { volume = 0.5, pitch = 1.4 })
+		if RARITY_ORDER[rar.id] >= RARITY_ORDER.Rare then Sound.play("medal", { volume = 0.6, pitch = 1.2, length = 1 }) end
+		wait(0.5)
+	else
+		-- dealt face-down into a grid of five by two
+		local size = Vector2.new(180, 234)
+		local cols = 5
+		local entries = {}
+		for i, got in ipairs(gots) do
+			local col, row = (i - 1) % cols, (i - 1) // cols
+			local target = UDim2.new(0.5, (col - (cols - 1) / 2) * 200, 0.46, (row - 0.5) * 254)
+			local card = UI.mk("Frame", { AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(size.X, size.Y), BackgroundTransparency = 1, ZIndex = 72, Parent = stage })
+			card:SetAttribute("W", size.X)
+			local back = backOf(card, look.color, size)
+			local front, rar, rank = frontOf(card, got, size)
+			card.Rotation = math.random(-25, 25)
+			Kit.tween(card, if pace.fast then 0.05 else 0.3, { Position = target, Rotation = 0 }, Enum.EasingStyle.Back)
+			table.insert(entries, { card = card, back = back, front = front, rar = rar, rank = rank, i = i })
+			if not pace.fast then
+				Sound.play("gateWhoosh", { volume = 0.25, pitch = 1.6 + i * 0.03 })
+				task.wait(0.06)
+			end
+		end
+		wait(0.45)
+		-- turned over rarest last; a rare one waits a beat and flashes
+		local order = table.clone(entries)
+		table.sort(order, function(a, b)
+			if a.rank ~= b.rank then return a.rank < b.rank end
+			return a.i < b.i
+		end)
+		for _, e in ipairs(order) do
+			local rare = e.rank >= RARITY_ORDER.Epic
+			if rare and not pace.fast then
+				Kit.shake(e.card, 6, 0.35)
+				task.wait(0.35)
+			end
+			flip(e.card, e.back, e.front, pace.fast)
+			if e.rank >= RARITY_ORDER.Rare and not pace.fast then
+				local f = UI.mk("ImageLabel", {
+					AnchorPoint = Vector2.new(0.5, 0.5), Position = e.card.Position, Size = UDim2.fromOffset(160, 160), BackgroundTransparency = 1,
+					Image = Kit.Art.radial, ImageColor3 = e.rar.color, ImageTransparency = 0.05, ZIndex = 71, Parent = stage,
+				})
+				Kit.tween(f, 0.6, { Size = UDim2.fromOffset(420, 420), ImageTransparency = 1 })
+				task.delay(0.65, function() f:Destroy() end)
+				Sound.play("medal", { volume = 0.35 + 0.1 * e.rank, pitch = 0.9 + 0.08 * e.rank, length = 0.8 })
+				Kit.pop(e.card, 1.18, 0.3)
+			end
+			if not pace.fast then task.wait(if rare then 0.25 else 0.1) end
+		end
+	end
+	skip.root.Visible = false
 	hurry:Destroy()
-	-- the best pull of a multi-open gets the spotlight
-	if n > 1 then
-		local top = order[#order]
-		Kit.pop(top.holder, 1.12, 0.35)
-	end
-	local again = Kit.button("Open Again", C.accent, UDim2.fromOffset(260, 58), 21)
+
+	-- 5 what now: again, auto, done
+	local again = Kit.button("Open Again", C.accent, UDim2.fromOffset(250, 60), 22)
 	again.root.AnchorPoint = Vector2.new(1, 0)
-	again.root.Position = UDim2.new(0.5, -10, 0, 530)
-	again.root.ZIndex = 68
+	again.root.Position = UDim2.new(0.5, -90, 0, 660)
+	again.root.ZIndex = 85
 	again.root.Parent = stage
-	local done = Kit.button("Done", C.green, UDim2.fromOffset(200, 58), 22)
-	done.root.Position = UDim2.new(0.5, 10, 0, 530)
-	done.root.ZIndex = 68
+	local auto = Kit.button(if self.auto then "Auto: on" else "Auto: off", if self.auto then C.yellow else C.grey, UDim2.fromOffset(160, 60), 20)
+	auto.root.AnchorPoint = Vector2.new(0.5, 0)
+	auto.root.Position = UDim2.new(0.5, 0, 0, 660)
+	auto.root.ZIndex = 85
+	auto.root.Parent = stage
+	local done = Kit.button("Done", C.green, UDim2.fromOffset(220, 60), 22)
+	done.root.Position = UDim2.new(0.5, 90, 0, 660)
+	done.root.ZIndex = 85
 	done.root.Parent = stage
-	Kit.appear(again.root, 0.2, 20)
-	Kit.appear(done.root, 0.28, 20)
-	local function finish()
-		for _, stop in ipairs(stops) do stop() end
-		Kit.tween(outer, 0.2, { BackgroundTransparency = 1 })
-		stage.Visible = false
-		task.delay(0.2, function()
-			outer.Visible = false
-			outer:ClearAllChildren()
-			self.busy = false
-		end)
-	end
-	done.onClick = finish
-	again.onClick = function()
-		finish()
+	Kit.appear(again.root, 0.05, 20)
+	Kit.appear(auto.root, 0.1, 20)
+	Kit.appear(done.root, 0.15, 20)
+	local can = self:affordable(zoneId, pay, count)
+	again.setEnabled(can)
+	local closing = false
+	local function nextOne()
+		self:finishReveal()
 		task.delay(0.3, function() self:openCrate(zoneId, pay, count) end)
 	end
-	local p = self.profile
-	local v = p and p.v2
-	local can = false
-	if v and p then
-		if pay == "keys" then can = v.keys >= Game.cratePrice(zoneId) * count
-		else can = p.credits >= Game.crateCash(zoneId, v.tier) * count end
+	done.onClick = function()
+		closing = true
+		self.auto = false
+		self:finishReveal()
 	end
-	again.setEnabled(can)
+	again.onClick = function()
+		if closing then return end
+		closing = true
+		nextOne()
+	end
+	auto.onClick = function()
+		self.auto = not self.auto
+		auto.setText(if self.auto then "Auto: on" else "Auto: off")
+		auto.setColor(if self.auto then C.yellow else C.grey)
+		if self.auto and can and not closing then
+			closing = true
+			task.delay(0.4, nextOne)
+		end
+	end
+	-- auto: on to the next one after a moment, while you can pay
+	if self.auto then
+		if can then
+			task.delay(1.4, function()
+				if self.auto and not closing and outer.Visible then
+					closing = true
+					nextOne()
+				end
+			end)
+		else
+			self.auto = false
+			auto.setText("Auto: off")
+			auto.setColor(C.grey)
+			Kit.callout(self.gui, "Auto stopped: not enough to open another", C.red, UDim2.fromScale(0.5, 0.12), 24)
+		end
+	end
 end
 
 return Crates2

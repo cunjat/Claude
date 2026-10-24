@@ -28,7 +28,9 @@ local function styleBeam(name: string): Beam?
 	return src and src:FindFirstChildWhichIsA("Beam", true) :: Beam?
 end
 
-function WindFX.new(folder: Instance)
+-- opts.tight (2026-10-22, the opening): the streams hug the tyre, thinner and closer in
+function WindFX.new(folder: Instance, opts: any?)
+	local tight = opts ~= nil and opts.tight == true
 	local self = setmetatable({}, WindFX)
 	self.folder = folder
 	self.tier = 0
@@ -53,16 +55,17 @@ function WindFX.new(folder: Instance)
 			for _, side in ipairs({ -1, 1 }) do
 				for _, twist in ipairs({ 0, math.pi / 2 }) do
 					local a0 = Instance.new("Attachment")
-					a0.CFrame = CFrame.new(layer.ahead, layer.y, side * layer.z) * CFrame.Angles(twist, 0, 0)
+					local zs, ys = (if tight then 0.42 else 1), (if tight then 0.5 else 1)
+					a0.CFrame = CFrame.new(layer.ahead, layer.y * ys, side * layer.z * zs) * CFrame.Angles(twist, 0, 0)
 					a0.Parent = anchor
 					local a1 = Instance.new("Attachment")
-					a1.CFrame = CFrame.new(-layer.behind, layer.y * 0.6, side * layer.z * 1.3) * CFrame.Angles(twist, 0, 0)
+					a1.CFrame = CFrame.new(-layer.behind, layer.y * 0.6 * ys, side * layer.z * 1.3 * zs * (if tight then 0.8 else 1)) * CFrame.Angles(twist, 0, 0)
 					a1.Parent = anchor
 					local b = src:Clone()
 					b.Attachment0 = a0
 					b.Attachment1 = a1
-					b.Width0 *= layer.width
-					b.Width1 *= layer.width
+					b.Width0 *= layer.width * (if tight then 0.55 else 1)
+					b.Width1 *= layer.width * (if tight then 0.55 else 1)
 					b.CurveSize0 *= side
 					b.Enabled = false
 					b.Parent = anchor

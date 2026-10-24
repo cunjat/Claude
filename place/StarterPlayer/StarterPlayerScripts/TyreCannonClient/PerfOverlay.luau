@@ -8,6 +8,7 @@ local RunService = game:GetService("RunService")
 local Stats = game:GetService("Stats")
 
 local UI = require(script.Parent.UI)
+local Kit = require(script.Parent.Kit)
 local Prefs = require(script.Parent.Prefs)
 local T = UI.Theme
 
@@ -18,9 +19,11 @@ function PerfOverlay.start(gui: ScreenGui)
 		Name = "Perf", AnchorPoint = Vector2.new(0, 1), Position = UDim2.new(0, 16, 1, -16), Size = UDim2.fromOffset(236, 30),
 		BackgroundTransparency = 1, Visible = false, ZIndex = 90, Parent = gui,
 	})
-	UI.plate("slot", { Name = "Plate", Size = UDim2.fromScale(1, 1), ImageTransparency = 0.15, ZIndex = 90, Parent = box })
-	local label = UI.text("", 13, "monoBold", T.text)
-	label.Size = UDim2.fromScale(1, 1)
+	Kit.slice("counter", nil, box, 90, 30 / Kit.Art.counter.h)
+	local label = Kit.text("", 13, Color3.new(1, 1, 1), 1.5, Kit.Body)
+	label.Size = UDim2.new(1, -16, 1, -4)
+	label.Position = UDim2.fromOffset(8, 2)
+	label.RichText = true
 	label.TextXAlignment = Enum.TextXAlignment.Center
 	label.ZIndex = 91
 	label.Parent = box

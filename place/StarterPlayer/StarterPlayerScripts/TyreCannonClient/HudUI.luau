@@ -81,6 +81,10 @@ function HudUI.new(parent: ScreenGui)
 		table.insert(self.slides, { frame = f, rest = f.Position, from = f.Position + from })
 	end
 
+	-- (2026-10-24) on a phone the right thumb's pads (TouchControls) fill the bottom right, so the speed
+	-- moves up under BAIL / VIEW and the chain goes to the left, beside the altimeter
+	local touchLayout = (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
+		or (game:GetService("RunService"):IsStudio() and workspace:GetAttribute("ForceTouch") == true)
 	---------------------------------------------------------------
 	-- top centre: distance and the zone rail
 	---------------------------------------------------------------
@@ -166,8 +170,10 @@ function HudUI.new(parent: ScreenGui)
 	---------------------------------------------------------------
 	-- right: the chain
 	---------------------------------------------------------------
-	local cr = corner(root, Vector2.new(1, 0.5), UDim2.new(1, -28, 0.36, 0), Vector2.new(230, 150))
-	slide(cr, UDim2.fromOffset(300, 0))
+	local cr = if touchLayout
+		then corner(root, Vector2.new(0, 0.5), UDim2.new(0, 96, 0.56, 0), Vector2.new(230, 150))
+		else corner(root, Vector2.new(1, 0.5), UDim2.new(1, -28, 0.36, 0), Vector2.new(230, 150))
+	slide(cr, UDim2.fromOffset(if touchLayout then -420 else 300, 0))
 	local chainBox = UI.mk("Frame", { Size = UDim2.fromOffset(230, 132), BackgroundTransparency = 1, Parent = cr })
 	Kit.slice("panel_body", nil, chainBox, 1, 0.4)
 	self.chainRing = Kit.slice("panel_ring", C.accent, chainBox, 2, 0.4)
@@ -201,10 +207,12 @@ function HudUI.new(parent: ScreenGui)
 	---------------------------------------------------------------
 	-- bottom right: speed on a slanted bar, boost charges as pips
 	---------------------------------------------------------------
-	local br = corner(root, Vector2.new(1, 1), UDim2.new(1, -24, 1, -22), Vector2.new(400, 150))
-	slide(br, UDim2.fromOffset(0, 220))
+	local br = if touchLayout
+		then corner(root, Vector2.new(1, 0), UDim2.new(1, -24, 0, 80), Vector2.new(400, 150))
+		else corner(root, Vector2.new(1, 1), UDim2.new(1, -24, 1, -22), Vector2.new(400, 150))
+	slide(br, UDim2.fromOffset(if touchLayout then 460 else 0, if touchLayout then 0 else 220))
 	local tilt = UI.mk("Frame", { AnchorPoint = Vector2.new(1, 1), Position = UDim2.new(1, 0, 1, -6), Size = UDim2.fromOffset(370, 36), BackgroundTransparency = 1, Rotation = -7, Parent = br })
-	local track, speedFill = Kit.bar(370, 36, C.accent)
+	local track, speedFill = Kit.bar(370, 36, C.accent, "off")
 	track.Parent = tilt
 	self.speedFill = speedFill
 	self.speed = Kit.text("0", 52, C.white, 3, ITALIC)
@@ -228,7 +236,7 @@ function HudUI.new(parent: ScreenGui)
 	slide(bc, UDim2.fromOffset(0, 140))
 	local touchOnly = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 	local nitro = UI.mk("Frame", { Name = "Nitro", AnchorPoint = Vector2.new(0.5, 1), Position = UDim2.new(0.5, 0, 1, 0), Size = UDim2.fromOffset(380, 32), BackgroundTransparency = 1, Parent = bc })
-	local ntrack, nfill = Kit.bar(380, 32, C.blue)
+	local ntrack, nfill = Kit.bar(380, 32, C.blue, "off")
 	ntrack.Parent = nitro
 	self.nitroFill = nfill
 	self.nitroTrack = ntrack
@@ -247,8 +255,8 @@ function HudUI.new(parent: ScreenGui)
 	self.nitroKey.Size = UDim2.fromOffset(100, 18)
 	self.nitroKey.ZIndex = 6
 	self.nitroKey.Parent = nitro
-	-- the moves: a key tile each above the nitro (FLOAT, DIVE, and the tyre's skill), lit while it's
-	-- working, filled while it's cooling. Tucking has no tile: the tyre itself shows it
+	-- the moves: a key tile each above the nitro (TUCK, FLOAT, DIVE, and the tyre's skill), lit while
+	-- it's working, filled while it's cooling. TUCK lights teal like the tyre does while it's tucked
 	local moves = corner(root, Vector2.new(0.5, 1), UDim2.new(0.5, 0, 1, -66), Vector2.new(460, 64))
 	slide(moves, UDim2.fromOffset(0, 160))
 	self.moves = moves
@@ -284,10 +292,10 @@ function HudUI.new(parent: ScreenGui)
 		self.moveTiles[id] = rec
 		return rec
 	end
-	-- (no TUCK tile: the tyre itself glows when a tuck pays)
-	tile("float", "FLOAT", touchOnly and "" or "W", C.blue, 54, 84)
-	tile("dive", "DIVE", touchOnly and "" or "S", C.orange, 146, 84)
-	tile("skill", "SKILL", touchOnly and "" or "E", PERFECT, 238, 168)
+	tile("tuck", "TUCK", touchOnly and "" or "SHIFT", C.teal, 8, 84)
+	tile("float", "FLOAT", touchOnly and "" or "W", C.blue, 100, 84)
+	tile("dive", "DIVE", touchOnly and "" or "S", C.orange, 192, 84)
+	tile("skill", "SKILL", touchOnly and "" or "E", PERFECT, 284, 168)
 	self.moveTiles.skill.root.Visible = false
 
 	---------------------------------------------------------------
@@ -313,14 +321,20 @@ function HudUI.new(parent: ScreenGui)
 	altCap.Parent = altBox
 
 	-- the first runs: what the controls do
-	local bl = corner(root, Vector2.new(0, 1), UDim2.new(0, 24, 1, -24), Vector2.new(420, 54))
+	-- (2026-10-23: on a dark card in three set lines; it wrapped mid-list in faint outlined text over the road)
+	local bl = corner(root, Vector2.new(0, 1), UDim2.new(0, 24, 1, -24), Vector2.new(400, 78))
 	self.hint = Kit.text(UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 		and "Drag to steer  ·  BOOST for nitro  ·  hills are your speed"
-		or "<b>MOUSE / A D</b> steer   <b>SPACE</b> nitro   <b>SHIFT</b> tuck   <b>W</b> float   <b>S</b> dive   <b>E</b> skill\nDown a hill is speed. Tuck when your tyre glows gold, and land on the slope.", 14, C.muted, 1.5, Kit.Body)
+		or "<b>MOUSE / A D</b> steer    <b>SPACE</b> nitro    <b>SHIFT</b> tuck\n<b>W</b> float    <b>S</b> dive    <b>E</b> skill\n<font transparency=\"0.3\">Downhill is speed: tuck when your tyre glows gold.</font>", 15, C.text, 0, Kit.Body)
 	self.hint.TextXAlignment = Enum.TextXAlignment.Left
 	self.hint.TextWrapped = true
-	self.hint.Size = UDim2.fromOffset(420, 54)
-	self.hint.TextYAlignment = Enum.TextYAlignment.Bottom
+	self.hint.LineHeight = 1.15
+	self.hint.Size = UDim2.fromOffset(400, 78)
+	self.hint.TextYAlignment = Enum.TextYAlignment.Center
+	self.hint.BackgroundColor3 = C.ink
+	self.hint.BackgroundTransparency = 0.4
+	UI.mk("UICorner", { CornerRadius = UDim.new(0, 10), Parent = self.hint })
+	UI.mk("UIPadding", { PaddingLeft = UDim.new(0, 14), PaddingRight = UDim.new(0, 10), Parent = self.hint })
 	self.hint.Parent = bl
 
 	self.warn = Kit.text("", 26, C.red, 2.5)
@@ -351,8 +365,16 @@ function HudUI:setTrack(track, best: number)
 	self.shownChain = 0
 	self.bestLabel.TextColor3 = C.gold
 	self.bestLabel.Text = (best and best > 0) and ("BEST  %s M"):format(UI.comma(best * P.StudsToMetres)) or "NO RECORD YET"
-	self.hint.Visible = not (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
+	-- (2026-10-23, the review: the hint paragraph every run was clutter) only while you're new (a best
+	-- under 1,500 m) and only the first two runs of a session
+	self.hintRuns = (self.hintRuns or 0) + 1
+	local newish = (best or 0) * P.StudsToMetres < 1500
+	-- (2026-10-24, the owner: "why is there a shift tuck gold crap in the bottom left during gameplay, remove
+	-- that") never shown: the tutorial teaches the controls, and the HUD's own buttons name them
+	self.hint.Visible = false
+	local _ = newish
 	self.hint.TextTransparency = 0
+	self.hint.BackgroundTransparency = 0.4
 	self:setChain(0, 1)
 end
 
@@ -508,6 +530,7 @@ function HudUI:update(s)
 
 	if s.runTime > 12 and self.hint.TextTransparency < 1 then
 		self.hint.TextTransparency = math.min(1, self.hint.TextTransparency + 0.02)
+		self.hint.BackgroundTransparency = 0.4 + 0.6 * self.hint.TextTransparency
 		local st = self.hint:FindFirstChildOfClass("UIStroke")
 		if st then st.Transparency = math.max(st.Transparency, self.hint.TextTransparency) end
 	end
@@ -531,12 +554,9 @@ end
 
 function HudUI:updateMoves(s, now: number)
 	local T = self.moveTiles
-	-- FLOAT and DIVE sit in the middle on their own, and move left to make room for a skill
-	local fx = if T.skill.root.Visible then 54 else 142
-	if T.float.root.Position.X.Offset ~= fx then
-		T.float.root.Position = UDim2.fromOffset(fx, 4)
-		T.dive.root.Position = UDim2.fromOffset(fx + 92, 4)
-	end
+	-- TUCK: lit while tucked; when the legs cramp it's dark until it's ready again
+	lightTile(T.tuck, s.tucking == true)
+	T.tuck.cool.Size = if s.tuckCool then UDim2.new(1, -8, 1, -8) else UDim2.new(1, -8, 0, 0)
 	-- FLOAT and DIVE: lit while you hold them in the air
 	lightTile(T.float, s.floating == true)
 	lightTile(T.dive, s.diving == true)
@@ -574,9 +594,9 @@ end
 -- stamps and toasts
 --==============================================================
 -- a big word that slams in tilted, holds and lifts away
-function HudUI:stamp(text: string, color: Color3, size: number, rot: number?, sub: string?, dy: number?)
+function HudUI:stamp(text: string, color: Color3, size: number, rot: number?, sub: string?)
 	local holder = UI.mk("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, -10 + (dy or 0)), Size = UDim2.fromOffset(640, size + 30),
+		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, -10), Size = UDim2.fromOffset(640, size + 30),
 		BackgroundTransparency = 1, ZIndex = 21, Rotation = rot or 0, Parent = self.toasts,
 	})
 	local l = Kit.text(text, size, color, 3.5, ITALIC)
@@ -668,8 +688,7 @@ function HudUI:event(e)
 		elseif e.what == "bonus" then
 			self.shownChain = e.chain
 			self:setChain(e.chain, e.combo)
-			-- (the skill's own name was just stamped; this one goes over the top of it, not on it)
-			self:stamp("SKILL ZONE", PERFECT, 40, 0, e.name, -70)
+			self:stamp("SKILL ZONE", PERFECT, 44, 0, e.name)
 		end
 	elseif k == "smooth" then
 		self.shownChain = e.chain
@@ -689,6 +708,8 @@ function HudUI:event(e)
 		self:stamp("CLEAN LANDING", GOOD, 38, 0, ("x%s"):format(Game.multText(e.combo)))
 	elseif k == "rough" then
 		self:toast("ROUGH LANDING  ·  TUCK TO BRACE", C.muted, 22)
+	elseif k == "bump" then
+		if not e.tucked then self:toast("SPEED BUMP  ·  TUCK TO KEEP SPEED", C.muted, 22) end
 	elseif k == "crash" then
 		self:toast("CRASH", C.red, 30)
 	elseif k == "hit" then
@@ -701,6 +722,13 @@ function HudUI:event(e)
 		self:toast("PAD", Color3.fromRGB(90, 250, 255), 24)
 	elseif k == "dustdevil" then
 		self:toast("UPDRAFT", C.yellow, 26)
+	-- (2026-10-24) the hold-to-bail, the roll-out warning and the fatigue cue
+	elseif k == "bailhold" then
+		self:toast(if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then "HOLD BAIL TO BAIL OUT" else "KEEP HOLDING TO BAIL OUT", C.muted, 22)
+	elseif k == "rollout" then
+		self:toast("ROLLING OUT  ·  BOOST TO KEEP GOING", C.yellow, 24)
+	elseif k == "headwind" then
+		self:toast("HEADWIND  ·  THE RUN IS TIRING", C.muted, 22)
 	elseif k == "metal" then
 		-- coins tick up in the corner; no toast each
 	elseif k == "checkpoint" then

@@ -81,7 +81,6 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 	local yaw = THUMB_YAW
 	local turning = true
 	local editing = false
-	local camTween: Tween? = nil
 	local held = 0      -- a drag turned it by hand: the slow turn waits this long to pick up again
 	local conn = RunService.RenderStepped:Connect(function(dt)
 		held = math.max(0, held - dt)
@@ -127,15 +126,12 @@ function TyreShow.stand(parent: Instance, size: UDim2): any
 		end
 		local size = root.AbsoluteSize
 		local CAM_EDIT = camEdit(aspect or (if size.Y > 0 then size.X / size.Y else 1))
-		-- (one glide at a time: a quick on-then-off cancels the first)
-		if camTween then camTween:Cancel() end
 		local cv = Instance.new("CFrameValue")
 		cv.Value = cam.CFrame
 		cv.Changed:Connect(function(v) cam.CFrame = v end)
 		local tw = game:GetService("TweenService"):Create(cv, TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out),
 			{ Value = if on then CAM_EDIT else CAM_SHOW })
 		tw.Completed:Connect(function() cv:Destroy() end)
-		camTween = tw
 		tw:Play()
 	end
 	function api.isEditing(): boolean return editing end
@@ -175,7 +171,46 @@ local function thumbModel(tyreId: string): Model
 	return tpl:Clone()
 end
 
-function TyreShow.thumb(parent: Instance, tyreId: string, known: boolean, size: UDim2, pos: UDim2): (ViewportFrame, Model?)
+-- every tyre's studio render (art/blender/icon_studio.py tyre_<id>): grids show these pictures,
+-- which cost nothing to draw; a tyre without one falls back to a live 3D view
+TyreShow.Icons = {
+	baldspare = "rbxassetid://136498267595316",
+	balloon = "rbxassetid://71290514512823",
+	beadlock = "rbxassetid://120183719021150",
+	cartwheel = "rbxassetid://93723252883476",
+	donut = "rbxassetid://120161526403521",
+	drill = "rbxassetid://92301601688586",
+	dumper = "rbxassetid://125832722307604",
+	gyro = "rbxassetid://102594471111874",
+	hubcap = "rbxassetid://127933641180269",
+	monster = "rbxassetid://132599889547439",
+	orbital = "rbxassetid://113140551734132",
+	original = "rbxassetid://118681656843198",
+	paddle = "rbxassetid://97577214358586",
+	scarab = "rbxassetid://115826208263269",
+	slick = "rbxassetid://87605540069066",
+	spinner = "rbxassetid://138523306390721",
+	splitfive = "rbxassetid://134602378066147",
+	square = "rbxassetid://94015933704812",
+	steelie = "rbxassetid://119594875115996",
+	tractorlug = "rbxassetid://84303211371613",
+	turbofan = "rbxassetid://76666931173494",
+	wheelbarrow = "rbxassetid://118105516246395",
+	whitewall = "rbxassetid://88149881920511",
+} :: { [string]: string }
+
+function TyreShow.thumb(parent: Instance, tyreId: string, known: boolean, size: UDim2, pos: UDim2): (GuiObject, Model?)
+	local icon = TyreShow.Icons[tyreId]
+	if icon then
+		-- found: the render as it is; not found yet: its dark silhouette
+		local img = UI.mk("ImageLabel", {
+			Name = "Thumb", AnchorPoint = Vector2.new(0.5, 0), Position = pos, Size = size, BackgroundTransparency = 1,
+			Image = icon, ScaleType = Enum.ScaleType.Fit,
+			ImageColor3 = if known then Color3.new(1, 1, 1) else Color3.fromRGB(26, 28, 36),
+			ImageTransparency = if known then 0 else 0.1, ZIndex = 8, Parent = parent,
+		})
+		return img, nil
+	end
 	local vp = UI.mk("ViewportFrame", {
 		Name = "Thumb", AnchorPoint = Vector2.new(0.5, 0), Position = pos, Size = size, BackgroundTransparency = 1,
 		ImageColor3 = if known then Color3.new(1, 1, 1) else Color3.fromRGB(150, 158, 178),

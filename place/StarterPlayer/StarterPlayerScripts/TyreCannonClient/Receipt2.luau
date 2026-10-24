@@ -31,7 +31,6 @@ function Receipt2.show(gui: ScreenGui, summary, payout, onAgain: () -> (), onUpg
 		AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromScale(0.5, 0.5), Size = UDim2.fromOffset(520, 560),
 		BackgroundTransparency = 1, ZIndex = 41, Parent = dim,
 	})
-	UI.autoScale(box, 1280, 760)
 	local holder, face = Kit.card(UDim2.fromOffset(520, 470), C.cream, 20, 9)
 	holder.Parent = box
 	Kit.header(face, payout.blowout and "Blowout!" or "Run Complete", if payout.blowout then C.red else C.accent, 56)
@@ -59,14 +58,17 @@ function Receipt2.show(gui: ScreenGui, summary, payout, onAgain: () -> (), onUpg
 		table.insert(rows, { label = label, value = value, color = color or C.gold })
 	end
 	row("Distance", "$" .. Game.short(b.base or 0))
-	if (b.combo or 1) > 1.001 then row(("Chain  ·  %d bounces"):format(payout.bounces or 0), ("x%s"):format(Game.multText(b.combo)), C.yellow) end
+	-- (2026-10-18: the chain row said "N bounces", a count of the retired bounce targets: always 0)
+	if (b.combo or 1) > 1.001 then row("Chain", ("x%s"):format(Game.multText(b.combo)), C.yellow) end
 	if (b.smash or 0) > 0 then row(("Smashes x%d"):format(payout.smashes or 0), "$" .. Game.short(b.smash)) end
 	if (b.coins or 0) > 0 then row("Coins", "$" .. Game.short(b.coins)) end
 	if (b.tricks or 0) > 0 then row("Perfects and air", "$" .. Game.short(b.tricks)) end
+	if (b.zone or 0) > 0 then row("Skill zones", "$" .. Game.short(b.zone)) end
 	if (parts.tyres or 1) > 1.001 then row("Tyres", ("x%.2f"):format(parts.tyres), C.purple) end
 	if (parts.overhaul or 1) > 1.001 then row("Overhauls", ("x%.1f"):format(parts.overhaul), C.orange) end
 	if (parts.bought or 1) > 1.001 then row("Boosts", ("x%g"):format(parts.bought), C.green) end
 	if (parts.friends or 1) > 1.001 then row("Friends", ("x%.1f"):format(parts.friends), C.blue) end
+	if (parts.premium or 1) > 1.001 then row("Premium", ("x%g"):format(parts.premium), Color3.fromRGB(255, 96, 176)) end
 	if (b.showboat or 1) > 1.001 then row("Showboat", "x1.25", C.yellow) end
 	Kit.section(face, "Paid Out", UDim2.fromOffset(30, 152), UDim2.fromOffset(460, 28), 4)
 	local y = 190
@@ -160,6 +162,24 @@ function Receipt2.show(gui: ScreenGui, summary, payout, onAgain: () -> (), onUpg
 	upgrade.root.ZIndex = 45
 	upgrade.root.Visible = false
 	upgrade.root.Parent = box
+	-- (2026-10-24) the card is as tall as what's on it, and it's scaled to fit the screen: with nine rows
+	-- and a few badges the buttons used to hang off the bottom of a phone, and a phone has no R key
+	-- (70 px spare: the top bar's inset, and a margin)
+	local tall = btnY + 64 + 8
+	box.Size = UDim2.fromOffset(520, tall)
+	local sc = UI.mk("UIScale", { Parent = box })
+	local function fit()
+		local cam = workspace.CurrentCamera
+		if not cam or not box.Parent then return end
+		local v = cam.ViewportSize
+		sc.Scale = math.max(0.3, math.min(UI.scaleNow(), (v.Y - 70) / tall, (v.X - 20) / 560))
+	end
+	fit()
+	local cam = workspace.CurrentCamera
+	if cam then
+		local vc = cam:GetPropertyChangedSignal("ViewportSize"):Connect(fit)
+		box.Destroying:Connect(function() vc:Disconnect() end)
+	end
 	-- the X: close the receipt and stay home (no upgrade, no second launch)
 	local xBtn = Kit.close(48)
 	xBtn.root.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -186,6 +206,8 @@ function Receipt2.show(gui: ScreenGui, summary, payout, onAgain: () -> (), onUpg
 	upgrade.onClick = function() close(onUpgrade) end
 	-- anything else that wants the screen (a dock panel) closes the receipt first and waits for it
 	Receipt2.active = close
+	-- (the tutorial points at these)
+	Receipt2.buttons = { again = again.root, upgrade = upgrade.root, box = box }
 	-- the hub's own Launch steps aside while the receipt offers Launch Again
 	if Receipt2.onShown then Receipt2.onShown(true) end
 	task.delay(tStart + 1.1, function()

@@ -37,6 +37,7 @@ local S: { [string]: any } = {
 	fakeWatchers = {},
 	liveOverride = {},
 	boardCache = {},
+	botNames = {}, -- Studio only: SpecBot's stand-in runner, by its (negative) user id
 }
 
 --==============================================================
@@ -80,8 +81,8 @@ local function plotSnapshot()
 			local pr = S.profiles[uid]
 			out[i] = {
 				userId = uid,
-				name = pl and pl.DisplayName or "?",
-				user = pl and pl.Name or "?",
+				name = pl and pl.DisplayName or S.botNames[uid] or "?",
+				user = pl and pl.Name or S.botNames[uid] or "?",
 				status = S.statusOf[uid] or "base",
 				skin = pr and pr.skin or "stock",
 				rim = pr and pr.rim or "steel",
@@ -220,6 +221,13 @@ require(script.Debug).init(S)
 require(script.Loop).init(S)
 require(script.Heats).init(S)
 require(script.Store).init(S)
+require(script.Growth).init(S)
+require(script.Career).init(S)
+-- (2026-10-22) the lost lug nuts round the hub
+do
+	local ok, err = pcall(function() require(script.HubHunt).init(S) end)
+	if not ok then warn("[TyreCannon] HubHunt:", err) end
+end
 
 --==============================================================
 -- spectating
@@ -250,14 +258,22 @@ local function stopWatching(viewerId: number)
 	end
 end
 
-Remotes.Spectate.OnServerInvoke = function(player: Player, targetUserId: any)
+Remotes.Spectate.OnServerInvoke = function(player: Player, targetUserId: any, onlyIf: any)
+	-- (leaving goes first and is never throttled: a stop swallowed after a quick hop left the
+	-- runner streaming to nobody)
+	if targetUserId == nil then
+		-- (onlyIf: a late undo from the client stops that watch only, never a newer one)
+		if onlyIf == nil or watchingWho[player.UserId] == onlyIf then stopWatching(player.UserId) end
+		return { ok = true, stopped = true }
+	end
 	if S.throttled(player, 0.3, "spectate") then return { ok = false, err = "One at a time." } end
 	stopWatching(player.UserId)
-	if targetUserId == nil then return { ok = true, stopped = true } end
 	if type(targetUserId) ~= "number" then return { ok = false, err = "Bad request." } end
 	if targetUserId == player.UserId then return { ok = false, err = "You can't watch yourself." } end
 	local target = Players:GetPlayerByUserId(targetUserId)
-	if not target then return { ok = false, err = "They've left." } end
+	-- (in Studio, SpecBot's stand-in runner can be watched too)
+	local botName = RunService:IsStudio() and S.botNames[targetUserId] or nil
+	if not target and not botName then return { ok = false, err = "They've left." } end
 	if (S.statusOf[targetUserId] or "base") ~= "attempt" then
 		return { ok = false, err = "They're not out on the road." }
 	end
@@ -265,18 +281,30 @@ Remotes.Spectate.OnServerInvoke = function(player: Player, targetUserId: any)
 	watchers[targetUserId][player.UserId] = true
 	watchingWho[player.UserId] = targetUserId
 	pushWatcherCount(targetUserId)
-	return { ok = true, target = targetUserId, name = target.DisplayName }
+	return { ok = true, target = targetUserId, name = if target then target.DisplayName else botName }
 end
 
 Remotes.RunState.OnServerEvent:Connect(function(player: Player, payload: any)
 	if type(payload) ~= "table" then return end
 	local set = watchers[player.UserId]
 	if not set then return end
+	-- relayed to every spectator, so about 10 a second and a small payload. The runner sends every
+	-- 0.1 s, so the gate sits a little under that (at exactly 0.1, network jitter dropped every other
+	-- frame); the run's last word (done) always goes through, or the watcher waits on a dead run.
+	if not payload.done and S.throttled(player, 0.06, "runState") then return end
+	local ok, json = pcall(function() return game:GetService("HttpService"):JSONEncode(payload) end)
+	if not ok or #json > 8000 then return end
 	for viewerId in pairs(set) do
 		local v = Players:GetPlayerByUserId(viewerId)
 		if v then Remotes.RunState:FireClient(v, player.UserId, payload) end
 	end
 end)
+
+-- (SpecBot, Studio only: a stand-in runner to test spectating with one player)
+S.spectate = { watchers = watchers, assignPlot = assignPlot, releasePlot = releasePlot, pushCount = pushWatcherCount }
+if RunService:IsStudio() and script:FindFirstChild("SpecBot") then
+	require(script.SpecBot).init(S)
+end
 
 --==============================================================
 -- lifecycle
@@ -296,7 +324,11 @@ local function dress(player: Player, char: Model)
 		avatarOf[player.UserId] = res
 	end
 	if char.Parent and hum.Parent then
-		pcall(function() (hum :: Humanoid):ApplyDescription((desc :: HumanoidDescription):Clone()) end)
+		-- (2026-10-24, the owner: "make everyone's R6 automatically be blocky R6") the avatar's clothes,
+		-- colours and accessories, on the plain block body: no packages, no custom head
+		local d = (desc :: HumanoidDescription):Clone()
+		d.Head, d.Torso, d.LeftArm, d.RightArm, d.LeftLeg, d.RightLeg = 0, 0, 0, 0, 0, 0
+		pcall(function() (hum :: Humanoid):ApplyDescription(d) end)
 	end
 end
 
@@ -415,7 +447,8 @@ Remotes.SetStatus.OnServerEvent:Connect(function(player: Player, status: any)
 	if S.statusOf[player.UserId] == status then return end
 	S.statusOf[player.UserId] = status
 	lastMove[player.UserId] = os.clock()
-	S.broadcastPlots()
+	-- batched: a client flipping its status fast can't make the server fire every client each time
+	queuePlotBroadcast()
 end)
 
 -- AFK comes from real movement, not a client claim
@@ -466,14 +499,37 @@ local SHOWN = {
 -- this week's best distances (a fresh store every UTC week, Monday to Monday)
 local WEEK = math.floor((os.time() + 3 * 86400) / (7 * 86400))
 table.insert(BOARDS, { key = "week", store = "tc_lb_week_v3_" .. WEEK, title = "THIS WEEK" })
+-- the Trophy Pillar's fourth board (2026-10-15): highest prestige
+table.insert(BOARDS, { key = "prestige", store = "tc_lb_prestige_v1", title = "TOP PRESTIGE" })
+local TrophyPillar = require(script:WaitForChild("TrophyPillar"))
+local prestigePosted: { [number]: number } = {}
 local boardStore: { [string]: OrderedDataStore? } = {}
 for _, b in ipairs(BOARDS) do
 	local ok, s = pcall(function() return DataStoreService:GetOrderedDataStore(b.store) end)
 	if ok then boardStore[b.key] = s end
 end
 local nameCache: { [number]: string } = {}
+-- (2026-10-18) a server that's up across Monday 00:00 UTC moves on to the new week's store; WEEK used
+-- to be fixed at start, so long servers kept posting into, and showing, last week's board
+local function checkWeek()
+	local w = math.floor((os.time() + 3 * 86400) / (7 * 86400))
+	if w == WEEK then return end
+	WEEK = w
+	local ok, st = pcall(function() return DataStoreService:GetOrderedDataStore("tc_lb_week_v3_" .. w) end)
+	if ok then boardStore.week = st end
+end
 
 local function refreshBoards()
+	checkWeek()
+	-- post each player's prestige here when it changes (the prestige board has no other writer)
+	for _, pl in ipairs(Players:GetPlayers()) do
+		local p = S.profiles[pl.UserId]
+		local lvl = p and math.floor(p.prestige or 0) or 0
+		if lvl > 0 and prestigePosted[pl.UserId] ~= lvl then
+			prestigePosted[pl.UserId] = lvl
+			S.postBoard("prestige", pl.UserId, lvl)
+		end
+	end
 	for _, b in ipairs(BOARDS) do
 		local rows = {}
 		local os_ = boardStore[b.key]
@@ -502,6 +558,7 @@ local function refreshBoards()
 				local p = S.profiles[pl.UserId]
 				if p then
 					local v = (b.key == "week" and math.floor((p.v2 and p.v2.bestEver or 0)))
+						or (b.key == "prestige" and math.floor(p.prestige or 0))
 						or (b.key == "robux" and p.lifetime.robux)
 						or (b.key == "distance" and math.floor(p.lifetime.bestDistance))
 						or (b.key == "credits" and math.floor(p.lifetime.credits))
@@ -529,10 +586,13 @@ function S.postBoard(key: string, userId: number, value: number)
 end
 
 function S.postWeekly(userId: number, metres: number)
+	checkWeek()
 	S.postBoard("week", userId, metres)
 end
 
 Remotes.Leaderboards.OnServerInvoke = function(_player: Player)
+	-- (retired 2026-10-12: the v1 Career board read DataStores unthrottled; the lobby boards don't use this)
+	if true then return {} end
 	local richest = {}
 	for _, pl in ipairs(Players:GetPlayers()) do
 		local p = S.profiles[pl.UserId]
@@ -620,6 +680,11 @@ local function lobbyBoards()
 end
 
 local function paintBoards()
+	-- the Trophy Pillar in the plaza carries the boards now; workspace attribute TrophyPillar=false brings the old signs back
+	if TrophyPillar.enabled() then
+		TrophyPillar.paint(S.boardCache, Config.Physics and Config.Physics.StudsToMetres or 1)
+		return
+	end
 	local m = lobbyBoards()
 	if not m then return end
 	local function fill(partName: string, rows: { any }, toMetres: number)
@@ -640,6 +705,7 @@ local function paintBoards()
 end
 
 task.spawn(function()
+	if TrophyPillar.enabled() then pcall(TrophyPillar.build) end
 	while true do
 		pcall(refreshBoards)
 		pcall(paintBoards)
@@ -662,7 +728,11 @@ local function promptProduct(player: Player, productId: number)
 	end
 end
 
+-- (BuyRobux, BuyCreditPack and Leaderboards are the v1 shop and Career board's: retired 2026-10-12,
+-- see Economy's RETIRED list. The bodies are kept, switched off.)
+local RETIRED_V1 = true
 Remotes.BuyRobux.OnServerEvent:Connect(function(player: Player, kind: any, id: any)
+	if RETIRED_V1 then return end
 	if type(kind) ~= "string" or type(id) ~= "string" then return end
 	local item
 	if kind == "pack" then
@@ -674,6 +744,7 @@ Remotes.BuyRobux.OnServerEvent:Connect(function(player: Player, kind: any, id: a
 end)
 
 Remotes.BuyCreditPack.OnServerEvent:Connect(function(player: Player, packId: any)
+	if RETIRED_V1 then return end
 	if type(packId) ~= "string" then return end
 	for _, c in ipairs(Config.CreditPacks) do
 		if c.id == packId then promptProduct(player, c.devProductId or 0) return end
@@ -696,6 +767,18 @@ MarketplaceService.ProcessReceipt = function(info)
 		local ok, seen = pcall(function() return receiptStore:GetAsync(key) end)
 		if not ok then return Enum.ProductPurchaseDecision.NotProcessedYet end
 		if seen == true then return Enum.ProductPurchaseDecision.PurchaseGranted end
+	end
+
+	-- Granted on an earlier try whose save failed: the grant is already in this profile, so
+	-- only the save is retried. Without this, a failed save meant Roblox retried the receipt
+	-- and the product was granted twice.
+	p.receipts = p.receipts or {}
+	if table.find(p.receipts, info.PurchaseId) then
+		if not S.save(info.PlayerId) and not RunService:IsStudio() then
+			return Enum.ProductPurchaseDecision.NotProcessedYet
+		end
+		if receiptStore then pcall(function() receiptStore:SetAsync(key, true) end) end
+		return Enum.ProductPurchaseDecision.PurchaseGranted
 	end
 
 	local message
@@ -723,6 +806,10 @@ MarketplaceService.ProcessReceipt = function(info)
 	end)
 	p.lifetime.robux += spent
 	S.postBoard("robux", info.PlayerId, p.lifetime.robux)
+
+	-- recorded with the grant, in the same save
+	table.insert(p.receipts, 1, info.PurchaseId)
+	while #p.receipts > 50 do table.remove(p.receipts) end
 
 	if not S.save(info.PlayerId) and not RunService:IsStudio() then
 		return Enum.ProductPurchaseDecision.NotProcessedYet

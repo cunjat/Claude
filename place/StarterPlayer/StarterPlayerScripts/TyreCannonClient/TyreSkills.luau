@@ -352,7 +352,7 @@ function TyreSkills:step(dt: number)
 
 	-- Mini-Turbo: hold the skill on the ground to charge, let go to fire
 	if self.skillId == "miniturbo" then
-		if self.held and sim.vx > 60 and not sim.blown then
+		if self.held and sim.vx > 60 and not sim.blown and (sim.grounded or (self.turbo or 0) > 0) and self.cooldown <= 0 then
 			self.turbo += dt
 			local tier = self.turbo >= 1.8 and 3 or (self.turbo >= 1.2 and 2 or (self.turbo >= 0.6 and 1 or 0))
 			if tier ~= (self.turboTier or 0) then
@@ -371,6 +371,8 @@ function TyreSkills:step(dt: number)
 				PackFX.burst("boost", CFrame.new(sim.x - Game.TyreRadius, sim.y, sim.z) * CFrame.Angles(0, 0, math.rad(90)), 10 * tier, TURBO[tier], 1.2)
 				Sound.play("gateWhoosh", { volume = 0.5 + 0.15 * tier, pitch = 1.2 })
 				sim.onEvent({ kind = "skill", name = ({ "MINI-TURBO", "SUPER TURBO", "ULTRA TURBO" })[tier] })
+				self.cooldown = self.skill.cooldown or 0
+				flash(self.card)
 			end
 			self.turbo = 0
 			self.turboTier = 0
@@ -616,8 +618,17 @@ function TyreSkills:sandevistan(on: boolean)
 				d.TimeScale = d.TimeScale * SANDY_WORLD
 			end
 		end
-		for _, d in ipairs(workspace:GetDescendants()) do slow(d) end
-		self.sandyConn = workspace.DescendantAdded:Connect(slow)
+		-- (2026-10-24) only the run's own world (the road's folder and the run's): walking the whole
+		-- Workspace hitched the frame
+		local conns = {}
+		local worlds = {}
+		if sim.world and sim.world.root then table.insert(worlds, sim.world.root) end
+		if sim.folder then table.insert(worlds, sim.folder) end
+		for _, world in ipairs(worlds) do
+			for _, d in ipairs(world:GetDescendants()) do slow(d) end
+			table.insert(conns, world.DescendantAdded:Connect(slow))
+		end
+		self.sandyConns = conns
 		-- and every sound drops
 		local pitched = {}
 		for _, g in ipairs(SoundService:GetDescendants()) do
@@ -666,8 +677,8 @@ function TyreSkills:sandevistan(on: boolean)
 		self.fovAdd = 0
 		self:glitch(0.18)
 		Sound.play("gateWhoosh", { volume = 0.5, pitch = 0.8 })
-		if self.sandyConn then self.sandyConn:Disconnect() end
-		self.sandyConn = nil
+		for _, c in ipairs(self.sandyConns or {}) do c:Disconnect() end
+		self.sandyConns = nil
 		for e, ts in pairs(self.sandySlowed or {}) do
 			if e.Parent then e.TimeScale = ts end
 		end
