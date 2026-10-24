@@ -12,6 +12,23 @@ local CLAIMS = [[
 ]]
 
 local DONE = [[
+2026-10-24  owner's Claude (cloud session, from edit_yum.rbxl)  FINAL TINKER. Title LAUNCH A TIRE (TyreLoading, Config.GameName,
+            Tutorial). BenchPose: no speech bubbles on the tyre-chat pose. LOADING: Preload waits only for THE INTERFACE + YOUR
+            YARD (your plot, Stages/Cannons/Machines/Characters/Lobby/Props, World.Decor); Preload.background after TyreReady
+            loads the road first, then tyres, sounds, Park/Nature/Vehicles/Prestige, then warms the road's models off-screen;
+            Main's second full preload of every asset removed; Sound's bank preload waits for TyreReady; TyreLoading 2 stages,
+            never READY before TyreReady; the interface wait gives up after 3 s without progress. WORKBENCH: tabs Tyres +
+            Customization; tyre PAINT (SurfaceAppearance TintMask tint, original AlphaMode restored when cleared) and SMOKE
+            colour (RunSim dust / tread smoke / landing dust); each sticker a colour tint (col) and repeat (repeatN copies
+            round the wheel, StickerCopy attribute); Remove/Clear/Save on one row; server Design keeps smoke + col;
+            TyreLook.dress/paint; the tyre in the cannon wears its design. Re-applied the 10-10 review fixes the place was
+            missing (sticker outline in bay shares, no drag on the opening click, visible-side picking, one camera glide,
+            sticker raycast copy cleanup, 4-col grid, one PERFECT per drop, tuck glow off in 1st person, cannon seat fixes,
+            Kit.bob stops with its object, skill-zone band/updraft follow terrain). RUN: WorldView far ring (22 pieces a side
+            1850-2700 out: Backroad tree stands, Dunes ridges; wrap forward, rebuilt per zone). HUB: rock pigeon from
+            TC_HubProps (Park/Pigeon RockPigeon, or built from the import), on its feet, not darkened; a flock on the plaza's
+            rangoli ring. tools/file_assets.luau files the pigeon. GOALS: Stage Trials harder (targets up, 8%/prestige,
+            misses ease 4% to 75%).
 2026-10-24  owner's Claude (session 6)  PRE-RELEASE FIXES + HUB PACK 6 FILED. Pack 6 (Import 3D "Scene") filed into
             Assets Park/Nature/Vehicles2 (old ones in ServerStorage.ArchivedAssets.Replaced_2026-10-24); LobbyTraffic LAMPS
             (heights over the axle); LobbyPark pigeon scale 1.15 + wing/tail hinges from the new parts, dog casts shadow.

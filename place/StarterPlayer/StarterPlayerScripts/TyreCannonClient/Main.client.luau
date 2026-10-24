@@ -688,6 +688,14 @@ require(script.Parent.GrowthClient).start({
 	idle = function() return tutorial ~= nil and tutorial.ctx.idle() and not tutorial:isChoosing() end,
 	v2 = V2,
 })
+-- shift lock lets go of the mouse while any menu or card is up, so its buttons can be clicked
+shiftLock.blocked = function()
+	if hub:isOpen() or (hubX and hubX:isDailyOpen()) then return true end
+	for _, p in ipairs(PANELS) do
+		if p and p.isOpen and p:isOpen() then return true end
+	end
+	return false
+end
 hubX = HubExtras.new(gui, V2, {
 	-- a newcomer's tutorial-or-skip comes before the daily reward
 	holdDaily = function() return tutorial ~= nil and tutorial:holdDaily() end,
