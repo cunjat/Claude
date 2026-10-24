@@ -1080,7 +1080,13 @@ function Loop.init(S)
 		end
 		if not owned then return { ok = false } end
 		-- only the fields the Tyre Studio uses, clamped; sidewall text is filtered for everyone else
-		local clean = { paint = {}, finish = {}, stickers = {}, text = "", smoke = nil }
+		-- (2026-10-24: paint's RimPrimary is the tyre's tint in the Customization tab; smoke is the
+		-- colour of its dust and tread smoke in a run; a sticker can carry a tint, col)
+		local function rgb(c: any): { number }?
+			if type(c) ~= "table" or #c ~= 3 then return nil end
+			return { math.clamp(tonumber(c[1]) or 0, 0, 1), math.clamp(tonumber(c[2]) or 0, 0, 1), math.clamp(tonumber(c[3]) or 0, 0, 1) }
+		end
+		local clean = { paint = {}, finish = {}, stickers = {}, text = "", smoke = rgb(design.smoke) }
 		if type(design.paint) == "table" then
 			for _, zone in ipairs({ "Rubber", "RimPrimary", "RimSecondary", "Accent" }) do
 				local c = design.paint[zone]
@@ -1111,6 +1117,7 @@ function Loop.init(S)
 						size = math.clamp(tonumber(s.size) or 1, 0.3, 2.5),
 						repeatN = math.clamp(math.floor(tonumber(s.repeatN) or 1), 1, 6),
 						mirror = s.mirror == true,
+						col = rgb(s.col),
 					})
 				end
 			end

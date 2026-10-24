@@ -9,6 +9,8 @@
 --     rot    degrees the picture itself is turned
 --     size   0.3 .. 2.5 (1 is about a third of the wheel's radius across)
 --     mirror also on the other side of the tyre
+--     repeatN this many copies, evenly round the wheel (1 .. 6)
+--     col    a tint for the picture, { r, g, b } 0..1 (none: its own colours)
 --   TyreSticker.apply(model, stickers)   replaces the stickers the model wears
 --   TyreSticker.catalogue()              { { id, texture, size, pack } }, grouped by pack
 --   TyreSticker.surface(model)           (radius, profile) : profile(r) is how far the sidewall
@@ -17,7 +19,8 @@
 -- of the whole wheel), tilted with the sidewall's slope, and one that crosses the shoulder (where the
 -- sidewall rolls over into the tread) is laid as two halves folded along its middle, so it bends
 -- with the rubber instead of standing off it. Every plate is named "Sticker" and carries the
--- sticker's place in the list (StickerIndex) and its side (StickerSide, 1 or -1).
+-- sticker's place in the list (StickerIndex), its side (StickerSide, 1 or -1) and which copy round
+-- the wheel it is (StickerCopy, 0 the first).
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local WheelAssembly = require(ReplicatedStorage:WaitForChild("TyreCannon"):WaitForChild("Modules"):WaitForChild("WheelAssembly"))
@@ -176,7 +179,7 @@ function TyreSticker.surface(model: Model): (number, (number) -> number)
 end
 
 -- one plate: centred on `c` (pivot space), its right and up along `right` and `up`, `w` by `h`
-local function plate(model: Model, pivot: CFrame, c: Vector3, right: Vector3, up: Vector3, w: number, h: number, side: number, texture: string, half: number?, index: number)
+local function plate(model: Model, pivot: CFrame, c: Vector3, right: Vector3, up: Vector3, w: number, h: number, side: number, texture: string, half: number?, index: number, tint: Color3?, copy: number)
 	local p = Instance.new("Part")
 	p.Name = "Sticker"
 	p.Size = Vector3.new(w, h, 0.04)
@@ -198,15 +201,18 @@ local function plate(model: Model, pivot: CFrame, c: Vector3, right: Vector3, up
 		t.StudsPerTileV = h * 2
 		t.OffsetStudsU = 0
 		t.OffsetStudsV = half * h
+		if tint then t.Color3 = tint end
 		t.Parent = p
 	else
 		local d = Instance.new("Decal")
 		d.Texture = texture
 		d.Face = face
+		if tint then d.Color3 = tint end
 		d.Parent = p
 	end
 	p:SetAttribute("StickerIndex", index)
 	p:SetAttribute("StickerSide", side)
+	p:SetAttribute("StickerCopy", copy)
 	p.Parent = model
 end
 
@@ -224,7 +230,11 @@ function TyreSticker.apply(model: Model, stickers: { any }?)
 		if entry then
 			local k = (s.size or 1) * radius / 4
 			local w, h = entry.size.X * k, entry.size.Y * k
-			local a = math.rad(s.a or 0)
+			local tint = TyreSticker.color(s.col)
+			-- repeated round the wheel: the copies evenly spaced from the first (copy 0 is the one you edit)
+			local n = math.clamp(math.floor(tonumber(s.repeatN) or 1), 1, 6)
+			for copy = 0, n - 1 do
+			local a = math.rad(s.a or 0) + copy * math.pi * 2 / n
 			local centre2 = CFrame.Angles(0, 0, -a) * Vector3.new(0, (s.r or 0.82) * radius, 0)
 			for _, side in ipairs(if s.mirror then { 1, -1 } else { 1 }) do
 				local orient = CFrame.Angles(0, 0, -a) * CFrame.Angles(0, 0, -math.rad((s.rot or 0) * side))
@@ -246,17 +256,24 @@ function TyreSticker.apply(model: Model, stickers: { any }?)
 				if bend < FOLD then
 					-- flat enough: one plate, tilted from its bottom edge to its top edge
 					local u = (top - bot).Unit
-					plate(model, pivot, (top + bot) / 2, right, u, w, (top - bot).Magnitude, side, entry.texture, nil, index)
+					plate(model, pivot, (top + bot) / 2, right, u, w, (top - bot).Magnitude, side, entry.texture, nil, index, tint, copy)
 				else
 					-- folded along its middle, each half on its own stretch of rubber
 					local u1 = (top - mid).Unit
-					plate(model, pivot, (top + mid) / 2, right, u1, w, (top - mid).Magnitude, side, entry.texture, 0, index)
+					plate(model, pivot, (top + mid) / 2, right, u1, w, (top - mid).Magnitude, side, entry.texture, 0, index, tint, copy)
 					local u2 = (mid - bot).Unit
-					plate(model, pivot, (mid + bot) / 2, right, u2, w, (mid - bot).Magnitude, side, entry.texture, 1, index)
+					plate(model, pivot, (mid + bot) / 2, right, u2, w, (mid - bot).Magnitude, side, entry.texture, 1, index, tint, copy)
 				end
+			end
 			end
 		end
 	end
+end
+
+-- a design's { r, g, b } (0..1) as a colour, or nil
+function TyreSticker.color(c: any): Color3?
+	if type(c) ~= "table" or #c ~= 3 then return nil end
+	return Color3.new(tonumber(c[1]) or 1, tonumber(c[2]) or 1, tonumber(c[3]) or 1)
 end
 
 return TyreSticker

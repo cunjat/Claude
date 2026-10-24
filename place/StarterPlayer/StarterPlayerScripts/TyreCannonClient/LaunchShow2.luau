@@ -140,7 +140,7 @@ local function aim(cannon: Model, scale: number): (Model?, Vector3?, Vector3?, V
 	return nil, nil, nil
 end
 
-function LaunchShow2.new(_skinId: string?, plot: Instance?, cannon: Model?, scale: number?, tyreId: string?)
+function LaunchShow2.new(_skinId: string?, plot: Instance?, cannon: Model?, scale: number?, tyreId: string?, design: any?)
 	if not (plot and cannon) then return nil end
 	local base = plot:GetAttribute("BaseCFrame") :: CFrame?
 	if not base then return nil end
@@ -172,7 +172,7 @@ function LaunchShow2.new(_skinId: string?, plot: Instance?, cannon: Model?, scal
 	self.breech = trunnion - (muzzle - trunnion) * 0.85
 
 	-- your tyre, lobbed in from above the muzzle
-	self.tyre = TyreLook.model(tyreId, TYRE_D, "ShowTyre")
+	self.tyre = TyreLook.model(tyreId, TYRE_D, "ShowTyre", design)
 	PrestigeLook.dressTyre(self.tyre, plot:GetAttribute("V2_Prestige") :: number?)
 	for _, d in ipairs(self.tyre:GetDescendants()) do
 		if d:IsA("BasePart") then

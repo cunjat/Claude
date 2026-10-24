@@ -430,7 +430,13 @@ function RunSim.start(opts)
 	self.weather = Weather.start(opts.trackId, folder)
 	self.camera.CFrame = self.camCF
 	self.camera.Focus = CFrame.new(self.x, self.y, self.z)
-	self.dust.Color = ColorSequence.new(self.tcfg.ground)
+	-- the tyre's smoke colour (Customization), in place of the road's own dust
+	local sc = opts.design and opts.design.smoke
+	if type(sc) == "table" and #sc == 3 then
+		self.smokeCol = Color3.new(tonumber(sc[1]) or 1, tonumber(sc[2]) or 1, tonumber(sc[3]) or 1)
+		if self.smokeEmitter then self.smokeEmitter.Color = ColorSequence.new(self.smokeCol) end
+	end
+	self.dust.Color = ColorSequence.new(self.smokeCol or self.tcfg.ground)
 
 	self.skills = TyreSkills.new(self, self.stats, opts.hudGui)
 	self.zones = SkillZones.new(self, self.stats.skill)
@@ -936,7 +942,7 @@ function RunSim:onLanding(land)
 	local impact = land.impact
 	local hang = self.airStreak
 	local at = Vector3.new(self.x, self.y - R + 0.4, self.z)
-	local dustCol = self.track:cfgAt(self.x).ground:Lerp(Color3.new(1, 1, 1), 0.3)
+	local dustCol = if self.smokeCol then self.smokeCol else self.track:cfgAt(self.x).ground:Lerp(Color3.new(1, 1, 1), 0.3)
 	if self.cam then RunCamera.thump(self.cam, math.min(impact, 400) * (if land.braced then 0.05 else 0.1)) end
 	local pounding = self.skills.pounding == true
 	if land.soft and land.braced and impact >= F.SoftImpact * 0.6 and not pounding then
@@ -1331,7 +1337,7 @@ function RunSim:step(dt: number)
 		self.shake = math.min(3, self.shake + 0.8)
 		Sound.play("gateWhoosh")
 		local bestSplit = self.ghost and self.ghost.splits[tier] or nil
-		if zone then self.dust.Color = ColorSequence.new(self.track:cfgAt(self.x).ground) end
+		if zone and not self.smokeCol then self.dust.Color = ColorSequence.new(self.track:cfgAt(self.x).ground) end
 		self.onEvent({ kind = "checkpoint", tier = tier, metres = self.x * P.StudsToMetres, split = self.runTime, bestSplit = bestSplit,
 			zone = zi, zoneName = zone and zone.name or nil })
 	end

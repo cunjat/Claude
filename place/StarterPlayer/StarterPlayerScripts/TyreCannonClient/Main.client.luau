@@ -464,13 +464,17 @@ startRun = function(_trackId: string?, auto: boolean?, _startX: number?)
 	-- at the cannon: the camera comes round, the tyre goes in, the dial decides the shot
 	local cannon = plot2:cannonOf(myPlot)
 	local launchId = nil
+	local launchDesign = nil   -- (its paint and stickers ride into the cannon with it)
 	local v2 = profile.v2
 	if v2 then
 		for _, t in ipairs(v2.inv) do
-			if t.uid == v2.launch then launchId = t.id end
+			if t.uid == v2.launch then
+				launchId = t.id
+				launchDesign = v2.designs and v2.designs[tostring(t.uid)] or nil
+			end
 		end
 	end
-	show = (cannon and LaunchShow2.new(profile.skin, myPlot, cannon, Plot2.ModelScale.cannon, launchId)) or LaunchShow.new(profile.skin, myPlot)
+	show = (cannon and LaunchShow2.new(profile.skin, myPlot, cannon, Plot2.ModelScale.cannon, launchId, launchDesign)) or LaunchShow.new(profile.skin, myPlot)
 	-- quick fire: after the first launch of a session the load-in plays fast; a Good or Weak shot
 	-- plays fast too, while a Great or Perfect keeps its full build-up (the tell is the point)
 	launchesThisSession += 1

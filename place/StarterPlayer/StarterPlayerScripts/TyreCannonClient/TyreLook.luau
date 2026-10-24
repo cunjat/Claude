@@ -4,7 +4,11 @@
 -- (Assets/Tyres/Tyre_<id>, art/blender/tyres3.py), the stock wheel until then. Every tyre is built
 -- 8 studs across with its axle along Z and the wheel centre 4 studs up, so the returned model's
 -- pivot is the wheel centre and it rolls about its Z axis, the same as the stock wheel.
---   TyreLook.model(tyreId, diameter, name?, design?) -> Model (unparented); a design's stickers are laid on it
+--   TyreLook.model(tyreId, diameter, name?, design?) -> Model (unparented), dressed in the design
+--   TyreLook.dress(model, design?)   a design on a built tyre: its paint and its stickers
+--   TyreLook.paint(model, color?)    the paint alone (nil: the tyre's own colours)
+-- The paint is a tint through the tyre's SurfaceAppearance (TintMask): it multiplies the baked
+-- texture, so black rubber stays black while the rims, whitewalls and chrome take the colour.
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local WheelAssembly = require(ReplicatedStorage:WaitForChild("TyreCannon"):WaitForChild("Modules"):WaitForChild("WheelAssembly"))
@@ -27,10 +31,36 @@ function TyreLook.model(tyreId: string?, diameter: number, name: string?, design
 		Models.turn(m, CFrame.new(0, BUILT / 2 * s, 0))
 		m.Name = name or m.Name
 		m.Parent = nil
-		if design and design.stickers then TyreSticker.apply(m, design.stickers) end
+		if design then TyreLook.dress(m, design) end
 		return m
 	end
 	return WheelAssembly.build(nil, { diameter = diameter, skin = "stock", rim = "steel", detail = "high", name = name or "Tyre" })
+end
+
+function TyreLook.paint(model: Model, color: Color3?)
+	for _, d in ipairs(model:GetDescendants()) do
+		if d:IsA("SurfaceAppearance") and not (d.Parent and d.Parent.Name == "Sticker") then
+			-- (only touched while painted: a tyre's own alpha mode, cut-outs and all, comes back unpainted)
+			pcall(function()
+				if color then
+					if d:GetAttribute("BaseAlphaMode") == nil then d:SetAttribute("BaseAlphaMode", d.AlphaMode.Name) end
+					d.AlphaMode = Enum.AlphaMode.TintMask
+					d.Color = color
+				elseif d:GetAttribute("BaseAlphaMode") ~= nil then
+					d.AlphaMode = (Enum.AlphaMode :: any)[d:GetAttribute("BaseAlphaMode")]
+					d.Color = Color3.new(1, 1, 1)
+					d:SetAttribute("BaseAlphaMode", nil)
+				end
+			end)
+		end
+	end
+end
+
+function TyreLook.dress(model: Model, design: any?)
+	local d = if type(design) == "table" then design else {}
+	local paint = type(d.paint) == "table" and TyreSticker.color(d.paint.RimPrimary) or nil
+	TyreLook.paint(model, paint)
+	TyreSticker.apply(model, d.stickers)
 end
 
 return TyreLook
